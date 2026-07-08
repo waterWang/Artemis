@@ -62,7 +62,6 @@ import { LocalStorageService } from 'app/foundation/service/local-storage.servic
 import { RepositoryType } from 'app/programming/shared/code-editor/model/code-editor.model';
 import { ExerciseEditorSyncService } from 'app/exercise/synchronization/services/exercise-editor-sync.service';
 import { ExerciseMetadataSyncService } from 'app/exercise/synchronization/services/exercise-metadata-sync.service';
-import { BuildPhasesTemplateService } from 'app/programming/shared/services/build-phases-template.service';
 
 export const LOCAL_STORAGE_KEY_IS_SIMPLE_MODE = 'isSimpleMode';
 const AUTO_START_CODE_GENERATION_ALL_REPOSITORIES_STATE = 'autoStartCodeGenerationAllRepositories';
@@ -86,7 +85,6 @@ const AUTO_START_CODE_GENERATION_ALL_REPOSITORIES_STATE = 'autoStartCodeGenerati
         FormFooterComponent,
         FeatureOverlayComponent,
     ],
-    providers: [BuildPhasesTemplateService],
 })
 export class ProgrammingExerciseUpdateComponent implements AfterViewInit, OnDestroy, OnInit {
     private readonly programmingExerciseService = inject(ProgrammingExerciseService);
@@ -108,7 +106,6 @@ export class ProgrammingExerciseUpdateComponent implements AfterViewInit, OnDest
     private readonly localStorageService = inject(LocalStorageService);
     private readonly exerciseEditorSyncService = inject(ExerciseEditorSyncService);
     private readonly metadataSyncService = inject(ExerciseMetadataSyncService);
-    private readonly buildPhasesTemplateService = inject(BuildPhasesTemplateService);
 
     private readonly packageNameRegexForJavaKotlin = RegExp(PACKAGE_NAME_PATTERN_FOR_JAVA_KOTLIN);
     private readonly packageNameRegexForJavaBlackbox = RegExp(PACKAGE_NAME_PATTERN_FOR_JAVA_BLACKBOX);
@@ -418,7 +415,6 @@ export class ProgrammingExerciseUpdateComponent implements AfterViewInit, OnDest
             } else {
                 this.programmingExercise.buildConfig = new ProgrammingExerciseBuildConfig();
             }
-            this.programmingExercise.customizeBuildPlan = language === ProgrammingLanguage.EMPTY;
         }
 
         // If we switch to another language which does not support static code analysis we need to reset options related to static code analysis
@@ -890,20 +886,6 @@ export class ProgrammingExerciseUpdateComponent implements AfterViewInit, OnDest
      * @param emptyRepositories if true, clear sources after setup
      */
     private saveExerciseWithOptions(emptyRepositories: boolean) {
-        // trim potential whitespaces that can lead to issues
-        if (this.programmingExercise.customizeBuildPlan) {
-            const phasesJSON = this.exerciseLanguageComponent()?.programmingExerciseCustomBuildPlanComponent()?.getBuildPlanPhasesJSON();
-            if (phasesJSON) {
-                this.programmingExercise.buildConfig!.buildPlanConfiguration = phasesJSON;
-            } else {
-                this.programmingExercise.buildConfig!.buildPlanConfiguration = undefined;
-            }
-            this.programmingExercise.buildConfig!.buildScript = undefined;
-        } else if (!this.isImportFromFile && !this.isImportFromSharing) {
-            this.programmingExercise.buildConfig!.buildPlanConfiguration = undefined;
-            this.programmingExercise.buildConfig!.buildScript = undefined;
-        }
-
         if (this.programmingExercise.buildConfig?.timeoutSeconds && this.programmingExercise.buildConfig?.timeoutSeconds < 1) {
             this.programmingExercise.buildConfig.timeoutSeconds = 0;
         }
@@ -1260,7 +1242,6 @@ export class ProgrammingExerciseUpdateComponent implements AfterViewInit, OnDest
         this.validateCheckoutPaths(validationErrorReasons);
         this.validateExercisePlagiarism(validationErrorReasons);
         this.validateGradingSection(validationErrorReasons);
-        this.validateBuildPhaseNames(validationErrorReasons);
 
         return validationErrorReasons;
     }
@@ -1295,21 +1276,6 @@ export class ProgrammingExerciseUpdateComponent implements AfterViewInit, OnDest
                         });
                     }
                 }
-            });
-        }
-    }
-
-    private validateBuildPhaseNames(validationErrorReasons: ValidationReason[]): void {
-        if (!this.programmingExercise.customizeBuildPlan || this.customBuildPlansSupported !== PROFILE_LOCALCI) {
-            return;
-        }
-
-        const customBuildPlanComponent = this.exerciseLanguageComponent()?.programmingExerciseCustomBuildPlanComponent();
-        const phasesValid = customBuildPlanComponent?.arePhaseNamesValid(this.buildPhasesTemplateService.buildPlan()?.phases ?? []);
-        if (!phasesValid) {
-            validationErrorReasons.push({
-                translateKey: 'artemisApp.programmingExercise.buildPhasesEditor.invalidPhaseNames',
-                translateValues: {},
             });
         }
     }

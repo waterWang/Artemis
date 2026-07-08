@@ -16,7 +16,6 @@ import { NgStyle } from '@angular/common';
 import { ExerciseTimelineComponent, ExerciseTimelineStatus, TimelineItem } from 'app/exercise/exercise-timeline/exercise-timeline.component';
 import { ExerciseFeedbackSuggestionOptionsComponent } from 'app/exercise/feedback-suggestion/exercise-feedback-suggestion-options.component';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import { BuildPhasesTemplateService } from 'app/programming/shared/services/build-phases-template.service';
 import { parseBuildPlanPhases } from 'app/programming/shared/entities/build-plan-phases.model';
 import { isEqual } from 'lodash-es';
 import { findParamInRouteHierarchy } from 'app/foundation/util/navigation.utils';
@@ -32,7 +31,6 @@ export class ProgrammingExerciseUpdateTimelineComponent implements OnInit {
     private profileService = inject(ProfileService);
     private activatedRoute = inject(ActivatedRoute);
     private programmingExerciseService = inject(ProgrammingExerciseService);
-    private buildPhasesTemplateService = inject(BuildPhasesTemplateService);
 
     protected readonly AssessmentType = AssessmentType;
 
@@ -42,7 +40,6 @@ export class ProgrammingExerciseUpdateTimelineComponent implements OnInit {
     complaintsInCourseEnabled = input(false);
     exampleSolutionPublicationDateSet = input(true);
     isInputDisplayedAccordingToCurrentOfSimpleOrAdvancedModeRecord = input<Record<ProgrammingExerciseInputField, boolean>>();
-    customizeBuildPlan = input<boolean | undefined>(undefined);
     skipAutomaticAfterDueDatePreview = input(false);
     exercise = input.required<ProgrammingExercise>();
 
@@ -158,8 +155,6 @@ export class ProgrammingExerciseUpdateTimelineComponent implements OnInit {
             }
         });
         effect(() => {
-            this.buildPhasesTemplateService.buildPlan();
-            this.customizeBuildPlan();
             this.updateAutomaticAfterDueDatePreview();
         });
     }
@@ -283,10 +278,11 @@ export class ProgrammingExerciseUpdateTimelineComponent implements OnInit {
 
         const routeExamId = findParamInRouteHierarchy(this.activatedRoute, 'examId');
 
+        // The build plan is edited on the dedicated build plan editor page, not in this form. For imports the build
+        // config is already present on the (not yet saved) exercise, so we parse it here; otherwise the server derives
+        // whether an after-due-date build phase exists from the persisted exercise.
         let hasAfterDueDateBuildPhase: boolean | undefined = undefined;
-        if (this.customizeBuildPlan()) {
-            hasAfterDueDateBuildPhase = !!this.buildPhasesTemplateService.buildPlan()?.phases?.some((phase) => phase.condition === 'AFTER_DUE_DATE');
-        } else if (this.isImport()) {
+        if (this.isImport()) {
             hasAfterDueDateBuildPhase = this.getImportedHasAfterDueDateBuildPhase();
         }
 
