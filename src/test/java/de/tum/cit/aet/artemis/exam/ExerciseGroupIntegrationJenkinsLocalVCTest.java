@@ -300,6 +300,16 @@ class ExerciseGroupIntegrationJenkinsLocalVCTest extends AbstractSpringIntegrati
             assertThat(listReceived.get(i).getTitle()).isEqualTo(listExpected.get(i).getTitle());
             assertThat(listReceived.get(i).getIsMandatory()).isEqualTo(listExpected.get(i).getIsMandatory());
         }
+
+        // Basis-preservation regression fence: the imported text exercise (index 6: modelling, text, file upload, quiz)
+        // must keep the source's details (problem statement, grading criteria, plagiarism config). The exam import now
+        // reloads these from the DB source, which must remain a no-op for the entity-shaped import-exercise-group path
+        // whose request body already carries the full exercises.
+        Exercise importedTextExercise = listReceived.get(6).getExercises().iterator().next();
+        TextExercise reloadedImportedText = textExerciseRepository.findWithGradingCriteriaCompetenciesAndPlagiarismDetectionConfigById(importedTextExercise.getId()).orElseThrow();
+        assertThat(reloadedImportedText.getProblemStatement()).isEqualTo("Exam Problem Statement");
+        assertThat(reloadedImportedText.getGradingCriteria()).isNotEmpty();
+        assertThat(reloadedImportedText.getPlagiarismDetectionConfig()).isNotNull();
     }
 
     @Test

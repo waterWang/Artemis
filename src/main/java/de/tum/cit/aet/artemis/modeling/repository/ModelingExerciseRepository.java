@@ -99,6 +99,17 @@ public interface ModelingExerciseRepository extends ArtemisJpaRepository<Modelin
     Optional<ModelingExercise> findForVersioningById(long exerciseId);
 
     /**
+     * Finds a modeling exercise together with the lazily-loaded "basis" details that are needed to preserve exercise
+     * content during exam import (grading criteria, competency links and the plagiarism detection config). These are
+     * otherwise lost because the exam-import skeleton is built from a slim DTO.
+     *
+     * @param exerciseId the id of the source exercise
+     * @return the exercise with its grading criteria, competency links and plagiarism detection config, or empty if not found
+     */
+    @EntityGraph(type = LOAD, attributePaths = { "competencyLinks.competency", "gradingCriteria", "plagiarismDetectionConfig" })
+    Optional<ModelingExercise> findWithGradingCriteriaCompetenciesAndPlagiarismDetectionConfigById(long exerciseId);
+
+    /**
      * Finds a modeling exercise by its title and course id and throws a NoUniqueQueryException if multiple exercises are found.
      *
      * @param title    the title of the exercise

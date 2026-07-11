@@ -37,6 +37,17 @@ public class FileUploadImportApi extends AbstractFileModuleApi {
         return fileUploadExerciseRepository.findWithGradingCriteriaByIdElseThrow(exerciseId);
     }
 
+    /**
+     * Loads the source file upload exercise with the basis details (grading criteria, competency links, plagiarism
+     * detection config) needed to preserve them during exam import.
+     *
+     * @param sourceExerciseId the id of the source exercise
+     * @return the source exercise with its basis details, or empty if it no longer exists
+     */
+    public Optional<FileUploadExercise> findWithExamImportBasisById(long sourceExerciseId) {
+        return fileUploadExerciseRepository.findWithGradingCriteriaCompetenciesAndPlagiarismDetectionConfigById(sourceExerciseId);
+    }
+
     public FileUploadExercise importFileUploadExercise(final FileUploadExercise templateExercise, FileUploadExercise importedExercise) {
         return fileUploadExerciseImportService.importFileUploadExercise(templateExercise, importedExercise);
     }

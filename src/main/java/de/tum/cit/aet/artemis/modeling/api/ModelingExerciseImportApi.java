@@ -57,6 +57,17 @@ public class ModelingExerciseImportApi extends AbstractModelingApi {
     }
 
     /**
+     * Loads the source modeling exercise with the basis details (grading criteria, competency links, plagiarism
+     * detection config) needed to preserve them during exam import.
+     *
+     * @param sourceExerciseId the id of the source exercise
+     * @return the source exercise with its basis details, or empty if it no longer exists
+     */
+    public Optional<ModelingExercise> findWithExamImportBasisById(long sourceExerciseId) {
+        return modelingExerciseRepository.findWithGradingCriteriaCompetenciesAndPlagiarismDetectionConfigById(sourceExerciseId);
+    }
+
+    /**
      * Finds a unique modeling exercise with competencies by title and course id.
      *
      * @param title    the title of the exercise

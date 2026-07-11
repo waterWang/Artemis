@@ -413,14 +413,32 @@ public class ExamImportService {
                         if (modelingExerciseImportApi.isEmpty()) {
                             yield Optional.empty();
                         }
-                        yield modelingExerciseImportApi.get().importModelingExercise(sourceExerciseId, (ModelingExercise) exerciseToCopy);
+                        ModelingExerciseImportApi api = modelingExerciseImportApi.get();
+                        Optional<ModelingExercise> optionalSource = api.findWithExamImportBasisById(sourceExerciseId);
+                        if (optionalSource.isEmpty()) {
+                            yield Optional.empty();
+                        }
+                        ModelingExercise source = optionalSource.get();
+                        ModelingExercise modelingSkeleton = (ModelingExercise) exerciseToCopy;
+                        copyExerciseDetailsForExamImport(source, modelingSkeleton);
+                        // Modeling-specific details that copyModelingExerciseBasis reads from the imported (skeleton) exercise.
+                        modelingSkeleton.setDiagramType(source.getDiagramType());
+                        modelingSkeleton.setExampleSolutionModel(source.getExampleSolutionModel());
+                        modelingSkeleton.setExampleSolutionExplanation(source.getExampleSolutionExplanation());
+                        yield api.importModelingExercise(sourceExerciseId, modelingSkeleton);
                     }
 
                     case TEXT -> {
                         if (textExerciseImportApi.isEmpty()) {
                             yield Optional.empty();
                         }
-                        yield textExerciseImportApi.get().importTextExercise(sourceExerciseId, (TextExercise) exerciseToCopy);
+                        TextExerciseImportApi api = textExerciseImportApi.get();
+                        Optional<TextExercise> optionalSource = api.findWithExamImportBasisById(sourceExerciseId);
+                        if (optionalSource.isEmpty()) {
+                            yield Optional.empty();
+                        }
+                        copyExerciseDetailsForExamImport(optionalSource.get(), exerciseToCopy);
+                        yield api.importTextExercise(sourceExerciseId, (TextExercise) exerciseToCopy);
                     }
 
                     case PROGRAMMING -> {
@@ -447,13 +465,19 @@ public class ExamImportService {
                         if (fileUploadImportApi.isEmpty()) {
                             yield Optional.empty();
                         }
-                        yield fileUploadImportApi.get().importFileUploadExercise(sourceExerciseId, (FileUploadExercise) exerciseToCopy);
+                        FileUploadImportApi api = fileUploadImportApi.get();
+                        Optional<FileUploadExercise> optionalSource = api.findWithExamImportBasisById(sourceExerciseId);
+                        if (optionalSource.isEmpty()) {
+                            yield Optional.empty();
+                        }
+                        copyExerciseDetailsForExamImport(optionalSource.get(), exerciseToCopy);
+                        yield api.importFileUploadExercise(sourceExerciseId, (FileUploadExercise) exerciseToCopy);
                     }
 
                     case QUIZ -> {
-                        // Use a query that eagerly loads quiz questions, grading criteria, and other needed associations
+                        // Use a query that eagerly loads quiz questions, grading criteria, plagiarism detection config and other needed associations
                         final Optional<QuizExercise> optionalOriginalQuizExercise = quizExerciseRepository
-                                .findWithEagerQuestionsAndStatisticsAndCompetenciesAndBatchesAndGradingCriteriaById(sourceExerciseId);
+                                .findWithEagerQuestionsAndStatisticsAndCompetenciesAndBatchesAndGradingCriteriaAndPlagiarismDetectionConfigById(sourceExerciseId);
                         if (optionalOriginalQuizExercise.isEmpty()) {
                             yield Optional.empty();
                         }
@@ -463,12 +487,20 @@ public class ExamImportService {
                         // same managed entity for both parameters, as that would corrupt the original
                         // quiz in the L1 cache. The exerciseToCopy skeleton already has the correct
                         // exercise group, title, shortName, etc. from the DTO conversion.
-                        // However, the skeleton does not contain quiz questions or batches (these are
-                        // not part of ExerciseImportDTO), so we must copy them from the original.
+                        // However, the skeleton does not contain the source exercise's details (problem
+                        // statement, difficulty, grading criteria, competency links, plagiarism config,
+                        // quiz questions/batches, quiz mode/duration): these are not part of
+                        // ExerciseImportDTO, so we copy them from the original before importing.
                         QuizExercise quizSkeleton = (QuizExercise) exerciseToCopy;
+                        copyExerciseDetailsForExamImport(originalQuizExercise, quizSkeleton);
                         quizSkeleton.setQuizQuestions(originalQuizExercise.getQuizQuestions());
-                        // Don't copy batches — exam timing controls quiz scheduling, and the import service
-                        // skips batch copying for exam exercises anyway.
+                        quizSkeleton.setQuizBatches(originalQuizExercise.getQuizBatches());
+                        // Quiz-specific configuration that copyQuizExerciseBasis reads from the imported (skeleton) exercise.
+                        quizSkeleton.setRandomizeQuestionOrder(originalQuizExercise.isRandomizeQuestionOrder());
+                        quizSkeleton.setAllowedNumberOfAttempts(originalQuizExercise.getAllowedNumberOfAttempts());
+                        quizSkeleton.setRemainingNumberOfAttempts(originalQuizExercise.getRemainingNumberOfAttempts());
+                        quizSkeleton.setQuizMode(originalQuizExercise.getQuizMode());
+                        quizSkeleton.setDuration(originalQuizExercise.getDuration());
                         // We don't allow a modification of the exercise at this point, so we can just pass an empty list of files.
                         yield Optional.of(quizExerciseImportService.importQuizExercise(originalQuizExercise, quizSkeleton, null));
                     }
@@ -531,6 +563,31 @@ public class ExamImportService {
         newExercise.setExampleSolutionPublicationDate(null);
 
         newExercise.forceNewProjectKey();
+    }
+
+    /**
+     * Copies the generic exercise "basis" details from the DB-loaded source exercise onto the transient exam-import
+     * skeleton. {@link de.tum.cit.aet.artemis.exam.dto.ExerciseImportDTO} only carries id/title/short name/points, so the
+     * skeleton built from it would otherwise be missing these details; {@code copyExerciseBasis} would then read null/blank
+     * values from it and silently drop the exercise content for MODELING/TEXT/FILE_UPLOAD/QUIZ exam exercises.
+     * <p>
+     * The client-editable overrides already present on the skeleton (title, short name, points and the target exercise
+     * group) are intentionally NOT overwritten. The skeleton is never persisted itself; it is only read by the per-type
+     * import services to build the new exercise, so sharing the source's (detached) grading criteria, competency links and
+     * plagiarism detection config here is safe — those import services deep-copy them into fresh, unmanaged instances.
+     *
+     * @param source   the DB-loaded source exercise with its basis details eagerly fetched
+     * @param skeleton the exam-import skeleton to enrich in place
+     */
+    private static void copyExerciseDetailsForExamImport(final Exercise source, final Exercise skeleton) {
+        skeleton.setProblemStatement(source.getProblemStatement());
+        skeleton.setDifficulty(source.getDifficulty());
+        skeleton.setAssessmentType(source.getAssessmentType());
+        skeleton.setIncludedInOverallScore(source.getIncludedInOverallScore());
+        skeleton.setGradingInstructions(source.getGradingInstructions());
+        skeleton.setGradingCriteria(source.getGradingCriteria());
+        skeleton.setCompetencyLinks(source.getCompetencyLinks());
+        skeleton.setPlagiarismDetectionConfig(source.getPlagiarismDetectionConfig());
     }
 
     /**

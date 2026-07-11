@@ -38,6 +38,17 @@ public class TextExerciseImportApi extends AbstractTextApi {
         return textExerciseImportService.importTextExercise(templateExercise, importedExercise);
     }
 
+    /**
+     * Loads the source text exercise with the basis details (grading criteria, competency links, plagiarism
+     * detection config) needed to preserve them during exam import.
+     *
+     * @param sourceExerciseId the id of the source exercise
+     * @return the source exercise with its basis details, or empty if it no longer exists
+     */
+    public Optional<TextExercise> findWithExamImportBasisById(long sourceExerciseId) {
+        return textExerciseRepository.findWithGradingCriteriaCompetenciesAndPlagiarismDetectionConfigById(sourceExerciseId);
+    }
+
     public Optional<TextExercise> importTextExercise(final long templateExerciseId, final TextExercise exerciseToCopy) {
         final Optional<TextExercise> optionalOriginalTextExercise = textExerciseRepository.findWithExampleSubmissionsAndResultsAndGradingCriteriaById(templateExerciseId);
         return optionalOriginalTextExercise.map(textExercise -> textExerciseImportService.importTextExercise(textExercise, exerciseToCopy));

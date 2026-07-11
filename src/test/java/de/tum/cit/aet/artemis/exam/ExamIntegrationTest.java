@@ -51,6 +51,7 @@ import org.springframework.util.MultiValueMap;
 import de.tum.cit.aet.artemis.account.domain.User;
 import de.tum.cit.aet.artemis.account.service.user.PasswordService;
 import de.tum.cit.aet.artemis.account.util.UserFactory;
+import de.tum.cit.aet.artemis.assessment.domain.GradingCriterion;
 import de.tum.cit.aet.artemis.assessment.service.ParticipantScoreScheduleService;
 import de.tum.cit.aet.artemis.communication.domain.conversation.Channel;
 import de.tum.cit.aet.artemis.communication.repository.conversation.ChannelRepository;
@@ -98,6 +99,7 @@ import de.tum.cit.aet.artemis.exercise.test_repository.SubmissionTestRepository;
 import de.tum.cit.aet.artemis.exercise.util.ExerciseUtilService;
 import de.tum.cit.aet.artemis.fileupload.domain.FileUploadExercise;
 import de.tum.cit.aet.artemis.fileupload.domain.FileUploadSubmission;
+import de.tum.cit.aet.artemis.fileupload.repository.FileUploadExerciseRepository;
 import de.tum.cit.aet.artemis.fileupload.util.ZipFileTestUtilService;
 import de.tum.cit.aet.artemis.globalsearch.dto.searchableentity.ExerciseSearchableEntityDTO;
 import de.tum.cit.aet.artemis.globalsearch.service.SearchableEntityWeaviateService;
@@ -106,6 +108,8 @@ import de.tum.cit.aet.artemis.globalsearch.util.WeaviateTestUtil;
 import de.tum.cit.aet.artemis.modeling.domain.DiagramType;
 import de.tum.cit.aet.artemis.modeling.domain.ModelingExercise;
 import de.tum.cit.aet.artemis.modeling.domain.ModelingSubmission;
+import de.tum.cit.aet.artemis.modeling.test_repository.ModelingExerciseTestRepository;
+import de.tum.cit.aet.artemis.plagiarism.domain.PlagiarismDetectionConfig;
 import de.tum.cit.aet.artemis.programming.domain.ProgrammingExercise;
 import de.tum.cit.aet.artemis.programming.test_repository.ProgrammingExerciseTestRepository;
 import de.tum.cit.aet.artemis.programming.util.RepositoryExportTestUtil;
@@ -115,6 +119,7 @@ import de.tum.cit.aet.artemis.quiz.util.QuizExerciseFactory;
 import de.tum.cit.aet.artemis.shared.base.AbstractSpringIntegrationJenkinsLocalVCBatchTest;
 import de.tum.cit.aet.artemis.text.domain.TextExercise;
 import de.tum.cit.aet.artemis.text.domain.TextSubmission;
+import de.tum.cit.aet.artemis.text.repository.TextExerciseRepository;
 import de.tum.cit.aet.artemis.text.util.TextExerciseFactory;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -166,6 +171,15 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
 
     @Autowired
     private ProgrammingExerciseTestRepository programmingExerciseRepository;
+
+    @Autowired
+    private ModelingExerciseTestRepository modelingExerciseRepository;
+
+    @Autowired
+    private TextExerciseRepository textExerciseRepository;
+
+    @Autowired
+    private FileUploadExerciseRepository fileUploadExerciseRepository;
 
     @Autowired(required = false)
     private WeaviateService weaviateService;
@@ -2192,6 +2206,110 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
                     }
                 }
             }
+        }
+    }
+
+    @Test
+    @WithMockUser(username = TEST_PREFIX + "instructor1", roles = "INSTRUCTOR")
+    void testImportExamWithExercises_preservesExerciseDetailsFromSource() throws Exception {
+        // Regression fence for a silent data-loss bug: the full-exam import builds a slim skeleton from ExamImportDTO
+        // (only id/title/short name/points). Before the fix, copyExerciseBasis read the exercise "basis" (problem
+        // statement, difficulty, grading instructions/criteria, plagiarism config, and modeling diagram/example solution)
+        // from that skeleton, so MODELING/TEXT/FILE_UPLOAD/QUIZ exam exercises were imported blank. The details must
+        // instead be reloaded from the DB source exercise.
+        Exam exam = examUtilService.addExamWithModellingAndTextAndFileUploadAndQuizAndEmptyGroup(course1);
+
+        // Enrich every source exercise with distinctive, non-default basis details so the assertions prove the values are
+        // copied from the source and are not left at their defaults or blanked out.
+        for (ExerciseGroup group : exam.getExerciseGroups()) {
+            for (Exercise sourceExercise : group.getExercises()) {
+                enrichSourceExerciseWithBasisDetails(sourceExercise);
+            }
+        }
+
+        ExamImportDTO importDTO = ExamImportDTO.of(exam, course1.getId());
+        Exam received = request.postWithResponseBody("/api/exam/courses/" + course1.getId() + "/exam-import", importDTO, ExamImportResultDTO.class, CREATED).exam();
+
+        // Reload the imported exam from a fresh query; never assert on the entities mutated in-place during the import.
+        Exam importedExam = examRepository.findWithExerciseGroupsAndExercisesByIdOrElseThrow(received.getId());
+        assertThat(importedExam.getExerciseGroups()).hasSize(4);
+        for (ExerciseGroup group : importedExam.getExerciseGroups()) {
+            assertThat(group.getExercises()).hasSize(1);
+            assertImportedExerciseBasisPreserved(group.getExercises().iterator().next());
+        }
+    }
+
+    @Test
+    @WithMockUser(username = TEST_PREFIX + "instructor1", roles = "INSTRUCTOR")
+    void testImportExamWithExercises_appliesEditedTitleOverSourceDetails() throws Exception {
+        // The import dialog lets the instructor edit only the title (and, for programming exercises, the short name).
+        // That client override must win, while every other detail is reloaded from the DB source. This locks in the
+        // precedence: overrides from the skeleton beat the source, basis details come from the source.
+        Exam exam = examUtilService.addExamWithModellingAndTextAndFileUploadAndQuizAndEmptyGroup(course1);
+        Exercise sourceModeling = exam.getExerciseGroups().getFirst().getExercises().iterator().next();
+        enrichSourceExerciseWithBasisDetails(sourceModeling);
+
+        // Simulate the instructor editing only the title: change it in-memory (NOT persisted) so the DTO carries the
+        // edited title while the DB source keeps its original title and details.
+        String editedTitle = "Edited modeling title";
+        sourceModeling.setTitle(editedTitle);
+        ExamImportDTO importDTO = ExamImportDTO.of(exam, course1.getId());
+
+        Exam received = request.postWithResponseBody("/api/exam/courses/" + course1.getId() + "/exam-import", importDTO, ExamImportResultDTO.class, CREATED).exam();
+
+        Exam importedExam = examRepository.findWithExerciseGroupsAndExercisesByIdOrElseThrow(received.getId());
+        Exercise importedModeling = importedExam.getExerciseGroups().getFirst().getExercises().iterator().next();
+        ModelingExercise reloaded = modelingExerciseRepository.findWithGradingCriteriaCompetenciesAndPlagiarismDetectionConfigById(importedModeling.getId()).orElseThrow();
+
+        // The edited title (client override) wins.
+        assertThat(reloaded.getTitle()).isEqualTo(editedTitle);
+        // The basis details still come from the DB source, not blanked and not overridden.
+        assertThat(reloaded.getProblemStatement()).isEqualTo("Preserved problem statement " + ExerciseType.MODELING);
+        assertThat(reloaded.getDifficulty()).isEqualTo(DifficultyLevel.HARD);
+        assertThat(reloaded.getGradingCriteria()).hasSize(1);
+        assertThat(reloaded.getPlagiarismDetectionConfig()).isNotNull();
+    }
+
+    /**
+     * Sets distinctive, non-default "basis" details on a source exercise and persists them, so that a later import can be
+     * asserted to have copied these exact values (rather than defaults or blanks) from the DB source.
+     */
+    private void enrichSourceExerciseWithBasisDetails(Exercise sourceExercise) {
+        sourceExercise.setProblemStatement("Preserved problem statement " + sourceExercise.getExerciseType());
+        sourceExercise.setDifficulty(DifficultyLevel.HARD);
+        sourceExercise.setGradingInstructions("Preserved grading instructions");
+        GradingCriterion criterion = new GradingCriterion();
+        criterion.setTitle("Preserved criterion " + sourceExercise.getExerciseType());
+        Set<GradingCriterion> criteria = new HashSet<>();
+        criteria.add(criterion);
+        sourceExercise.setGradingCriteria(criteria);
+        sourceExercise.setPlagiarismDetectionConfig(new PlagiarismDetectionConfig());
+        exerciseRepository.save(sourceExercise);
+    }
+
+    /**
+     * Reloads the imported exercise from a fresh, eagerly-fetched query and asserts that all its basis details survived
+     * the import (i.e. were copied from the DB source rather than from the slim import skeleton).
+     */
+    private void assertImportedExerciseBasisPreserved(Exercise imported) {
+        ExerciseType type = imported.getExerciseType();
+        Exercise reloaded = switch (type) {
+            case MODELING -> modelingExerciseRepository.findWithGradingCriteriaCompetenciesAndPlagiarismDetectionConfigById(imported.getId()).orElseThrow();
+            case TEXT -> textExerciseRepository.findWithGradingCriteriaCompetenciesAndPlagiarismDetectionConfigById(imported.getId()).orElseThrow();
+            case FILE_UPLOAD -> fileUploadExerciseRepository.findWithGradingCriteriaCompetenciesAndPlagiarismDetectionConfigById(imported.getId()).orElseThrow();
+            case QUIZ -> quizExerciseRepository.findWithEagerQuestionsAndStatisticsAndCompetenciesAndBatchesAndGradingCriteriaAndPlagiarismDetectionConfigById(imported.getId())
+                    .orElseThrow();
+            default -> throw new IllegalStateException("Unexpected exercise type in exam import test: " + type);
+        };
+        assertThat(reloaded.getProblemStatement()).as("problem statement preserved for %s", type).isEqualTo("Preserved problem statement " + type);
+        assertThat(reloaded.getDifficulty()).as("difficulty preserved for %s", type).isEqualTo(DifficultyLevel.HARD);
+        assertThat(reloaded.getGradingInstructions()).as("grading instructions preserved for %s", type).isEqualTo("Preserved grading instructions");
+        assertThat(reloaded.getGradingCriteria()).as("grading criteria preserved for %s", type).hasSize(1);
+        assertThat(reloaded.getGradingCriteria().iterator().next().getTitle()).as("grading criterion title preserved for %s", type).isEqualTo("Preserved criterion " + type);
+        assertThat(reloaded.getPlagiarismDetectionConfig()).as("plagiarism detection config preserved for %s", type).isNotNull();
+        if (reloaded instanceof ModelingExercise modeling) {
+            assertThat(modeling.getDiagramType()).as("modeling diagram type preserved").isEqualTo(DiagramType.ClassDiagram);
+            assertThat(modeling.getExampleSolutionModel()).as("modeling example solution model preserved").isEqualTo("This is my example solution model");
         }
     }
 
