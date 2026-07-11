@@ -117,7 +117,10 @@ export class ExamImportComponent extends ImportComponent<Exam> implements OnInit
             // summary of any skipped or incomplete exercises (so the editor cannot overlook them).
             const totalExercises = (exerciseGroups ?? []).reduce((sum, group) => sum + (group.exercises?.length ?? 0), 0);
             const importId = this.examManagementService.generateImportId();
-            const request$ = this.examManagementService.importExerciseGroup(this.targetCourseId()!, this.targetExamId()!, exerciseGroups, importId);
+            // Send only the slim import descriptors (ids + client overrides). The server reloads every other exercise detail
+            // from the DB source, so the entity graph must not travel in the request body.
+            const importDTOs = ExamManagementService.convertExerciseGroupsToImportDTO(exerciseGroups);
+            const request$ = this.examManagementService.importExerciseGroup(this.targetCourseId()!, this.targetExamId()!, importDTOs, importId);
             this.examImportProgressDialog()
                 .runImport(importId, totalExercises, request$)
                 .then((response: HttpResponse<ExerciseGroupImportResultDTO>) => {

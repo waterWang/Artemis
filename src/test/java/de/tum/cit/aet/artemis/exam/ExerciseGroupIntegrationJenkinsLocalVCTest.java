@@ -28,8 +28,10 @@ import de.tum.cit.aet.artemis.core.util.CourseUtilService;
 import de.tum.cit.aet.artemis.course.domain.Course;
 import de.tum.cit.aet.artemis.exam.domain.Exam;
 import de.tum.cit.aet.artemis.exam.domain.ExerciseGroup;
+import de.tum.cit.aet.artemis.exam.dto.ExerciseGroupImportDTO;
 import de.tum.cit.aet.artemis.exam.dto.ExerciseGroupImportResultDTO;
 import de.tum.cit.aet.artemis.exam.dto.ExerciseGroupUpdateDTO;
+import de.tum.cit.aet.artemis.exam.dto.ExerciseImportDTO;
 import de.tum.cit.aet.artemis.exam.test_repository.ExamTestRepository;
 import de.tum.cit.aet.artemis.exam.util.ExamFactory;
 import de.tum.cit.aet.artemis.exam.util.ExamUtilService;
@@ -123,8 +125,8 @@ class ExerciseGroupIntegrationJenkinsLocalVCTest extends AbstractSpringIntegrati
         request.get("/api/exam/courses/" + course1.getId() + "/exams/" + exam1.getId() + "/exercise-groups/" + exerciseGroup1.getId(), HttpStatus.FORBIDDEN, ExerciseGroup.class);
         request.getList("/api/exam/courses/" + course1.getId() + "/exams/" + exam1.getId() + "/exercise-groups", HttpStatus.FORBIDDEN, ExerciseGroup.class);
         request.delete("/api/exam/courses/" + course1.getId() + "/exams/" + exam1.getId() + "/exercise-groups/" + exerciseGroup1.getId(), HttpStatus.FORBIDDEN);
-        request.postListWithResponseBody("/api/exam/courses/" + course1.getId() + "/exams/" + exam1.getId() + "/import-exercise-group", List.of(exerciseGroup), ExerciseGroup.class,
-                HttpStatus.FORBIDDEN);
+        request.postListWithResponseBody("/api/exam/courses/" + course1.getId() + "/exams/" + exam1.getId() + "/import-exercise-group",
+                List.of(ExerciseGroupImportDTO.of(exerciseGroup)), ExerciseGroup.class, HttpStatus.FORBIDDEN);
     }
 
     @Test
@@ -216,8 +218,8 @@ class ExerciseGroupIntegrationJenkinsLocalVCTest extends AbstractSpringIntegrati
         exercise2.setTitle(title2);
         examRepository.save(exam);
 
-        request.postListWithResponseBody("/api/exam/courses/" + course1.getId() + "/exams/" + exam1.getId() + "/import-exercise-group", List.of(exerciseGroup), ExerciseGroup.class,
-                HttpStatus.BAD_REQUEST);
+        request.postListWithResponseBody("/api/exam/courses/" + course1.getId() + "/exams/" + exam1.getId() + "/import-exercise-group",
+                List.of(ExerciseGroupImportDTO.of(exerciseGroup)), ExerciseGroup.class, HttpStatus.BAD_REQUEST);
     }
 
     @Test
@@ -228,7 +230,7 @@ class ExerciseGroupIntegrationJenkinsLocalVCTest extends AbstractSpringIntegrati
         final List<ExerciseGroup> exerciseGroupsBefore = targetExam.getExerciseGroups();
 
         final List<ExerciseGroup> exerciseGroupsNow = request
-                .postWithResponseBody("/api/exam/courses/" + course1.getId() + "/exams/" + targetExam.getId() + "/import-exercise-group", exerciseGroupsBefore,
+                .postWithResponseBody("/api/exam/courses/" + course1.getId() + "/exams/" + targetExam.getId() + "/import-exercise-group", toImportDTOs(exerciseGroupsBefore),
                         ExerciseGroupImportResultDTO.class, HttpStatus.OK)
                 .exerciseGroups();
 
@@ -260,7 +262,7 @@ class ExerciseGroupIntegrationJenkinsLocalVCTest extends AbstractSpringIntegrati
         exerciseRepository.deleteById(sourceQuiz.getId());
 
         ExerciseGroupImportResultDTO result = request.postWithResponseBody("/api/exam/courses/" + course1.getId() + "/exams/" + targetExam.getId() + "/import-exercise-group",
-                groupsToImport, ExerciseGroupImportResultDTO.class, HttpStatus.OK);
+                toImportDTOs(groupsToImport), ExerciseGroupImportResultDTO.class, HttpStatus.OK);
 
         // The skipped quiz is reported to the editor via the "skipped" list in the response body (not silently dropped).
         assertThat(result.skippedExercises()).as("the skipped quiz title must be reported").contains(quizTitle);
@@ -289,7 +291,7 @@ class ExerciseGroupIntegrationJenkinsLocalVCTest extends AbstractSpringIntegrati
         final List<ExerciseGroup> listSendToServer = secondExam.getExerciseGroups();
 
         final List<ExerciseGroup> listReceived = request.postWithResponseBody("/api/exam/courses/" + course1.getId() + "/exams/" + targetExam.getId() + "/import-exercise-group",
-                listSendToServer, ExerciseGroupImportResultDTO.class, HttpStatus.OK).exerciseGroups();
+                toImportDTOs(listSendToServer), ExerciseGroupImportResultDTO.class, HttpStatus.OK).exerciseGroups();
 
         final List<ExerciseGroup> listExpected = new ArrayList<>(targetExam.getExerciseGroups());
         listExpected.addAll(listSendToServer);
@@ -306,9 +308,9 @@ class ExerciseGroupIntegrationJenkinsLocalVCTest extends AbstractSpringIntegrati
         }
 
         // Basis-preservation regression fence: the imported text exercise (index 6: modelling, text, file upload, quiz)
-        // must keep the source's details (problem statement, grading criteria). The exam import now reloads these from the
-        // DB source, which must remain a no-op for the entity-shaped import-exercise-group path whose request body already
-        // carries the full exercises.
+        // must keep the source's details (problem statement, grading criteria). The request body is now the slim
+        // ExerciseGroupImportDTO shape (ids + client overrides only), so these details are necessarily reloaded from the DB
+        // source during import rather than travelling in the body.
         Exercise importedTextExercise = listReceived.get(6).getExercises().iterator().next();
         TextExercise reloadedImportedText = textExerciseRepository.findWithCompetencyLinksById(importedTextExercise.getId()).orElseThrow();
         assertThat(reloadedImportedText.getProblemStatement()).isEqualTo("Exam Problem Statement");
@@ -330,7 +332,7 @@ class ExerciseGroupIntegrationJenkinsLocalVCTest extends AbstractSpringIntegrati
         final List<ExerciseGroup> listSendToServer = secondExam.getExerciseGroups();
 
         final List<ExerciseGroup> listReceived = request.postWithResponseBody("/api/exam/courses/" + course2.getId() + "/exams/" + targetExam.getId() + "/import-exercise-group",
-                listSendToServer, ExerciseGroupImportResultDTO.class, HttpStatus.OK).exerciseGroups();
+                toImportDTOs(listSendToServer), ExerciseGroupImportResultDTO.class, HttpStatus.OK).exerciseGroups();
         assertThat(listReceived).hasSize(9);
 
         final List<ExerciseGroup> listExpected = new ArrayList<>(targetExam.getExerciseGroups());
@@ -367,8 +369,8 @@ class ExerciseGroupIntegrationJenkinsLocalVCTest extends AbstractSpringIntegrati
         versionControlService.createProjectForExercise(programming);
         doReturn(null).when(continuousIntegrationService).checkIfProjectExists(any(), any());
 
-        request.postListWithResponseBody("/api/exam/courses/" + course1.getId() + "/exams/" + exam.getId() + "/import-exercise-group", List.of(programmingGroup),
-                ExerciseGroup.class, HttpStatus.BAD_REQUEST);
+        request.postListWithResponseBody("/api/exam/courses/" + course1.getId() + "/exams/" + exam.getId() + "/import-exercise-group",
+                List.of(ExerciseGroupImportDTO.of(programmingGroup)), ExerciseGroup.class, HttpStatus.BAD_REQUEST);
     }
 
     @Test
@@ -418,5 +420,69 @@ class ExerciseGroupIntegrationJenkinsLocalVCTest extends AbstractSpringIntegrati
         // Should fail with different exercise group
         orderedExerciseGroups = Arrays.asList(exerciseGroup2, exerciseGroup3, ExamFactory.generateExerciseGroup(true, exam));
         request.put("/api/exam/courses/" + course1.getId() + "/exams/" + exam.getId() + "/exercise-groups-order", orderedExerciseGroups, HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    @WithMockUser(username = TEST_PREFIX + "instructor1", roles = "INSTRUCTOR")
+    void importExerciseGroup_minimalDTOFallsBackToSourcePointsAndTitle() throws Exception {
+        // The client body only needs a source id + type; every other exercise detail is reloaded from the DB source. A
+        // minimal DTO that omits the title/maxPoints/bonusPoints overrides must therefore persist the SOURCE's title and
+        // points, not a blank title or the BaseExercise point defaults (1.0 / 0.0). This closes the previously documented
+        // maxPoints/bonusPoints null-vs-default limitation on the import-exercise-group path.
+        textExercise1.setTitle("Source text title");
+        textExercise1.setMaxPoints(17.0);
+        textExercise1.setBonusPoints(3.0);
+        textExerciseRepository.save(textExercise1);
+
+        ExerciseImportDTO minimalExercise = new ExerciseImportDTO(textExercise1.getId(), textExercise1.getExerciseType(), null, null, null, null);
+        ExerciseGroupImportDTO groupDTO = new ExerciseGroupImportDTO("Imported group", true, List.of(minimalExercise));
+
+        request.postWithResponseBody("/api/exam/courses/" + course1.getId() + "/exams/" + exam2.getId() + "/import-exercise-group", List.of(groupDTO),
+                ExerciseGroupImportResultDTO.class, HttpStatus.OK);
+
+        Exam reloaded = examRepository.findWithExerciseGroupsAndExercisesById(exam2.getId()).orElseThrow();
+        Exercise imported = reloaded.getExerciseGroups().stream().filter(group -> "Imported group".equals(group.getTitle())).flatMap(group -> group.getExercises().stream())
+                .findFirst().orElseThrow();
+        TextExercise reloadedImported = textExerciseRepository.findById(imported.getId()).orElseThrow();
+
+        // Omitted overrides fall back to the DB source (source-first): title and BOTH point fields.
+        assertThat(reloadedImported.getTitle()).isEqualTo("Source text title");
+        assertThat(reloadedImported.getMaxPoints()).isEqualTo(17.0);
+        assertThat(reloadedImported.getBonusPoints()).isEqualTo(3.0);
+    }
+
+    @Test
+    @WithMockUser(username = TEST_PREFIX + "instructor1", roles = "INSTRUCTOR")
+    void importExerciseGroup_appliesClientOverridesOverSource() throws Exception {
+        // The instructor can edit the client-editable overrides in the import dialog. A DTO that supplies title/points must
+        // win over the source's values, while every other detail is still reloaded from the source.
+        textExercise1.setTitle("Source text title");
+        textExercise1.setMaxPoints(17.0);
+        textExercise1.setBonusPoints(3.0);
+        textExerciseRepository.save(textExercise1);
+
+        ExerciseImportDTO overriddenExercise = new ExerciseImportDTO(textExercise1.getId(), textExercise1.getExerciseType(), "Edited text title", null, 42.0, 7.0);
+        ExerciseGroupImportDTO groupDTO = new ExerciseGroupImportDTO("Overridden group", true, List.of(overriddenExercise));
+
+        request.postWithResponseBody("/api/exam/courses/" + course1.getId() + "/exams/" + exam2.getId() + "/import-exercise-group", List.of(groupDTO),
+                ExerciseGroupImportResultDTO.class, HttpStatus.OK);
+
+        Exam reloaded = examRepository.findWithExerciseGroupsAndExercisesById(exam2.getId()).orElseThrow();
+        Exercise imported = reloaded.getExerciseGroups().stream().filter(group -> "Overridden group".equals(group.getTitle())).flatMap(group -> group.getExercises().stream())
+                .findFirst().orElseThrow();
+        TextExercise reloadedImported = textExerciseRepository.findById(imported.getId()).orElseThrow();
+
+        // The supplied overrides win.
+        assertThat(reloadedImported.getTitle()).isEqualTo("Edited text title");
+        assertThat(reloadedImported.getMaxPoints()).isEqualTo(42.0);
+        assertThat(reloadedImported.getBonusPoints()).isEqualTo(7.0);
+    }
+
+    /**
+     * Maps exercise-group entities to the slim {@link ExerciseGroupImportDTO} wire shape the import endpoint now consumes,
+     * mirroring the client's request body (ids + client overrides only).
+     */
+    private static List<ExerciseGroupImportDTO> toImportDTOs(List<ExerciseGroup> exerciseGroups) {
+        return exerciseGroups.stream().map(ExerciseGroupImportDTO::of).toList();
     }
 }

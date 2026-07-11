@@ -12,6 +12,7 @@ import { ExamInformationDTO } from 'app/exam/shared/entities/exam-information.mo
 import { StudentDTO } from 'app/core/shared/entities/student-dto.model';
 import { StudentExam } from 'app/exam/shared/entities/student-exam.model';
 import { ExerciseGroup } from 'app/exam/shared/entities/exercise-group.model';
+import { ExerciseType } from 'app/exercise/shared/entities/exercise/exercise.model';
 import { ExamScoreDTO } from 'app/exam/manage/exam-scores/exam-score-dtos.model';
 import { StatsForDashboard } from 'app/assessment/shared/assessment-dashboard/stats-for-dashboard.model';
 import { TextSubmission } from 'app/text/shared/entities/text-submission.model';
@@ -119,22 +120,45 @@ describe('Exam Management Service Tests', () => {
     it('should import an exercise group', async () => {
         // GIVEN
         const mockExam: Exam = { id: 1 };
-        const mockExerciseGroup = [{ id: 2 } as ExerciseGroup];
+        // The request body is the slim ExerciseGroupImportDTO shape (group title / mandatory flag + per-exercise id, type
+        // and the client-editable overrides), not the entity graph.
+        const importDTOs = [{ title: 'Group 0', isMandatory: true, exercises: [{ id: 2, exerciseType: ExerciseType.TEXT, title: 't', shortName: undefined, maxPoints: 5 }] }];
+        const responseGroups = [{ id: 2 } as ExerciseGroup];
         const importId = 'import-2';
 
         // WHEN: the response carries the full ExerciseGroupImportResultDTO
-        service.importExerciseGroup(course.id!, mockExam.id!, mockExerciseGroup, importId).subscribe((res) => expect(res.body).toEqual({ exerciseGroups: mockExerciseGroup }));
+        service.importExerciseGroup(course.id!, mockExam.id!, importDTOs, importId).subscribe((res) => expect(res.body).toEqual({ exerciseGroups: responseGroups }));
 
         // THEN (the importId is a query param, so match on the path and assert the param separately)
         const req = httpMock.expectOne(
             (request) => request.method === 'POST' && request.url === `${service.resourceUrl}/${course.id!}/exams/${mockExam.id!}/import-exercise-group`,
         );
-        expect(req.request.body).toEqual(mockExerciseGroup);
+        expect(req.request.body).toEqual(importDTOs);
         expect(req.request.params.get('importId')).toBe(importId);
 
         // CLEANUP
-        req.flush({ exerciseGroups: mockExerciseGroup });
+        req.flush({ exerciseGroups: responseGroups });
         await Promise.resolve();
+    });
+
+    it('should convert exercise groups to the slim import DTO shape (only ids + client overrides)', () => {
+        const exerciseGroups = [
+            {
+                title: 'Group 0',
+                isMandatory: false,
+                exercises: [{ id: 7, type: ExerciseType.PROGRAMMING, title: 'Prog', shortName: 'PROG', maxPoints: 10, bonusPoints: 2, problemStatement: 'must not travel' } as any],
+            } as ExerciseGroup,
+        ];
+
+        const dtos = ExamManagementService.convertExerciseGroupsToImportDTO(exerciseGroups);
+
+        expect(dtos).toEqual([
+            {
+                title: 'Group 0',
+                isMandatory: false,
+                exercises: [{ id: 7, exerciseType: ExerciseType.PROGRAMMING, title: 'Prog', shortName: 'PROG', maxPoints: 10, bonusPoints: 2 }],
+            },
+        ]);
     });
 
     it('should subscribe to import progress on the user-specific websocket channel', () => {

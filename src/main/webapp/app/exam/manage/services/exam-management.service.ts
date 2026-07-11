@@ -123,10 +123,10 @@ export class ExamManagementService {
      *
      * @param courseId the course id into which the exercise groups should be imported
      * @param examId the exam id to which the exercise groups should be added
-     * @param exerciseGroups the exercise groups to be added to the exam
+     * @param exerciseGroups the slim exercise-group import descriptors (see {@link convertExerciseGroupsToImportDTO}) to be added to the exam
      * @param importId a client-generated id correlating this import with its websocket progress channel
      */
-    importExerciseGroup(courseId: number, examId: number, exerciseGroups: ExerciseGroup[], importId: string): Observable<HttpResponse<ExerciseGroupImportResultDTO>> {
+    importExerciseGroup(courseId: number, examId: number, exerciseGroups: ExerciseGroupImportDTO[], importId: string): Observable<HttpResponse<ExerciseGroupImportResultDTO>> {
         return this.http.post<ExerciseGroupImportResultDTO>(`${this.resourceUrl}/${courseId}/exams/${examId}/import-exercise-group`, exerciseGroups, {
             params: { importId },
             observe: 'response',
@@ -563,19 +563,31 @@ export class ExamManagementService {
             exampleSolutionPublicationDate: convertDateFromClient(exam.exampleSolutionPublicationDate),
             channelName: exam.channelName,
             courseId: courseId,
-            exerciseGroups: exam.exerciseGroups?.map((group) => ({
-                title: group.title,
-                isMandatory: group.isMandatory ?? true,
-                exercises: group.exercises?.map((exercise) => ({
-                    id: exercise.id,
-                    exerciseType: exercise.type,
-                    title: exercise.title,
-                    shortName: exercise.shortName,
-                    maxPoints: exercise.maxPoints,
-                    bonusPoints: exercise.bonusPoints,
-                })),
-            })),
+            exerciseGroups: exam.exerciseGroups ? ExamManagementService.convertExerciseGroupsToImportDTO(exam.exerciseGroups) : undefined,
         };
+    }
+
+    /**
+     * Maps exercise groups (as loaded into the import screens) to the slim {@link ExerciseGroupImportDTO} wire shape the
+     * server import endpoints consume. Only the fields the server needs are sent: the group title / mandatory flag and, per
+     * exercise, the source id, type and the client-editable overrides (title, short name, max points, bonus points). Every
+     * other exercise detail is reloaded from the DB source during import, so it must not — and does not — travel in the body.
+     * These fields are all guaranteed by both the current entity wire and a conservative future exam-import response DTO.
+     * @param exerciseGroups the exercise groups to convert
+     */
+    public static convertExerciseGroupsToImportDTO(exerciseGroups: ExerciseGroup[]): ExerciseGroupImportDTO[] {
+        return exerciseGroups.map((group) => ({
+            title: group.title,
+            isMandatory: group.isMandatory ?? true,
+            exercises: group.exercises?.map((exercise) => ({
+                id: exercise.id,
+                exerciseType: exercise.type,
+                title: exercise.title,
+                shortName: exercise.shortName,
+                maxPoints: exercise.maxPoints,
+                bonusPoints: exercise.bonusPoints,
+            })),
+        }));
     }
 
     private processExamResponseFromServer(res: EntityResponseType): EntityResponseType {
@@ -671,7 +683,7 @@ export class ExamManagementService {
     }
 }
 
-interface ExerciseImportDTO {
+export interface ExerciseImportDTO {
     id?: number;
     exerciseType?: string;
     title?: string;
@@ -680,7 +692,7 @@ interface ExerciseImportDTO {
     bonusPoints?: number;
 }
 
-interface ExerciseGroupImportDTO {
+export interface ExerciseGroupImportDTO {
     title?: string;
     isMandatory: boolean;
     exercises?: ExerciseImportDTO[];

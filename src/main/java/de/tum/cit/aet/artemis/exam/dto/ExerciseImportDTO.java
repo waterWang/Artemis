@@ -51,18 +51,15 @@ public record ExerciseImportDTO(@NotNull Long id, @NotNull ExerciseType exercise
         Exercise exercise = createExerciseByType(exerciseType);
 
         exercise.setId(id);
-        if (title != null) {
-            exercise.setTitle(title);
-        }
-        if (shortName != null) {
-            exercise.setShortName(shortName);
-        }
-        if (maxPoints != null) {
-            exercise.setMaxPoints(maxPoints);
-        }
-        if (bonusPoints != null) {
-            exercise.setBonusPoints(bonusPoints);
-        }
+        // Set the client-editable overrides unconditionally so an OMITTED override is faithfully preserved as a null field
+        // on the skeleton. BaseExercise initializes maxPoints/bonusPoints to 1.0/0.0, so a guarded setter would leave those
+        // non-null defaults and make "omitted" indistinguishable from "explicitly requested the default". The exam-import
+        // merge relies on a null here meaning "override omitted" and backfills it from the reloaded source exercise
+        // (source-first + non-null-override); see ExamImportService#backfillOmittedBasisOverridesFromSource.
+        exercise.setTitle(title);
+        exercise.setShortName(shortName);
+        exercise.setMaxPoints(maxPoints);
+        exercise.setBonusPoints(bonusPoints);
 
         return exercise;
     }

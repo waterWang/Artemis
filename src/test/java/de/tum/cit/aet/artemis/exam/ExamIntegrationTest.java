@@ -2318,14 +2318,12 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
         Exercise importedModeling = importedExam.getExerciseGroups().getFirst().getExercises().iterator().next();
         ModelingExercise reloaded = modelingExerciseRepository.findWithCompetencyLinksById(importedModeling.getId()).orElseThrow();
 
-        // title is distinguishable from "omitted" on the skeleton (it has no non-null field initializer), so the merge
-        // falls back to the source's value instead of persisting a blank title.
+        // An omitted title/maxPoints/bonusPoints override is faithfully carried as null on the skeleton (ExerciseImportDTO
+        // sets all three unconditionally, so they are NOT masked by the BaseExercise 1.0/0.0 defaults). The merge therefore
+        // falls back to the source's values instead of persisting a blank title or the BaseExercise point defaults.
         assertThat(reloaded.getTitle()).isEqualTo("Source modeling title");
-        // Documented, known limitation (see copyExerciseDetailsForExamImport): BaseExercise defaults maxPoints/bonusPoints to
-        // 1.0/0.0, and an omitted override is indistinguishable on the skeleton from a DTO that explicitly requested those
-        // exact defaults, so the merge does NOT fall back to the source's points here; the BaseExercise defaults persist.
-        assertThat(reloaded.getMaxPoints()).isEqualTo(1.0);
-        assertThat(reloaded.getBonusPoints()).isEqualTo(0.0);
+        assertThat(reloaded.getMaxPoints()).isEqualTo(17.0);
+        assertThat(reloaded.getBonusPoints()).isEqualTo(3.0);
     }
 
     /**

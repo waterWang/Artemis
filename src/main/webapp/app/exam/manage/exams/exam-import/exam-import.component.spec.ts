@@ -231,6 +231,7 @@ describe('Exam Import Component', () => {
         await Promise.resolve();
         await Promise.resolve();
         expect(importSpy).toHaveBeenCalledOnce();
-        expect(importSpy).toHaveBeenCalledWith(1, 2, [exerciseGroup1], 'test-import-id');
+        // The request body is the slim ExerciseGroupImportDTO shape (ids + client overrides), not the entity graph.
+        expect(importSpy).toHaveBeenCalledWith(1, 2, ExamManagementService.convertExerciseGroupsToImportDTO([exerciseGroup1]), 'test-import-id');
     }
 });

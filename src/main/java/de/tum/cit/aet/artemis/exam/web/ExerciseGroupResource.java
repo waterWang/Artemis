@@ -35,6 +35,7 @@ import de.tum.cit.aet.artemis.core.util.HeaderUtil;
 import de.tum.cit.aet.artemis.exam.config.ExamEnabled;
 import de.tum.cit.aet.artemis.exam.domain.Exam;
 import de.tum.cit.aet.artemis.exam.domain.ExerciseGroup;
+import de.tum.cit.aet.artemis.exam.dto.ExerciseGroupImportDTO;
 import de.tum.cit.aet.artemis.exam.dto.ExerciseGroupImportResultDTO;
 import de.tum.cit.aet.artemis.exam.dto.ExerciseGroupUpdateDTO;
 import de.tum.cit.aet.artemis.exam.repository.ExamRepository;
@@ -156,23 +157,29 @@ public class ExerciseGroupResource {
     /**
      * POST /courses/{courseId}/exams/{examId}/import-exercise-group : Imports exercise groups to the specified exam
      *
-     * @param courseId             the course to which the exam belongs
-     * @param examId               the exam to which the exercise groups should be added
-     * @param updatedExerciseGroup the list of Exercise Groups to be imported
-     * @param importId             an optional client-supplied id; when present, live import progress is sent to the importing user over a websocket
+     * @param courseId                the course to which the exam belongs
+     * @param examId                  the exam to which the exercise groups should be added
+     * @param exerciseGroupImportDTOs the slim import descriptors (group title / mandatory flag plus, per exercise, the source id, type and the client-editable overrides)
+     * @param importId                an optional client-supplied id; when present, live import progress is sent to the importing user over a websocket
      * @return the ResponseEntity with status 201 (Created) and with body the newly imported exercise groups, or with status 400 (Bad Request)
      */
     @PostMapping("courses/{courseId}/exams/{examId}/import-exercise-group")
     @EnforceAtLeastEditor
     public ResponseEntity<ExerciseGroupImportResultDTO> importExerciseGroup(@PathVariable Long courseId, @PathVariable Long examId,
-            @RequestBody List<ExerciseGroup> updatedExerciseGroup, @RequestParam(required = false) String importId) throws IOException {
-        log.debug("REST request to import {} exercise group(s) to exam {}", updatedExerciseGroup.size(), examId);
+            @RequestBody List<ExerciseGroupImportDTO> exerciseGroupImportDTOs, @RequestParam(required = false) String importId) throws IOException {
+        log.debug("REST request to import {} exercise group(s) to exam {}", exerciseGroupImportDTOs.size(), examId);
 
         examAccessService.checkCourseAndExamAccessForEditorElseThrow(courseId, examId);
 
+        // Build transient exercise-group skeletons (ids + client overrides only) from the slim DTOs. The import service
+        // reloads every source exercise from the DB and overlays these overrides, so the slim request body is sufficient;
+        // the programming title/short-name pre-check and the ExamConfigurationException error response keep working from the
+        // skeletons exactly as before.
+        List<ExerciseGroup> updatedExerciseGroups = exerciseGroupImportDTOs.stream().map(ExerciseGroupImportDTO::toEntity).toList();
+
         // When the client supplies an importId, live progress is reported to the importing user over a websocket so the UI
         // can show a progress dialog while this (synchronous) request runs.
-        ExerciseGroupImportResultDTO importResult = examImportService.importExerciseGroupsWithExercisesToExistingExam(updatedExerciseGroup, examId, courseId, importId,
+        ExerciseGroupImportResultDTO importResult = examImportService.importExerciseGroupsWithExercisesToExistingExam(updatedExerciseGroups, examId, courseId, importId,
                 userRepository.getCurrentUserLogin());
 
         // The exercise groups are always created. Any exercises that could not be imported are reported in the response

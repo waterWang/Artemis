@@ -601,11 +601,11 @@ public class ExamImportService {
      * skeleton built from it would otherwise be missing these details; {@code copyExerciseBasis} would then read null/blank
      * values from it and silently drop the exercise content for MODELING/TEXT/FILE_UPLOAD/QUIZ exam exercises.
      * <p>
-     * The client-editable overrides already present on the skeleton (title, short name, points and the target exercise
-     * group) are intentionally NOT overwritten when present. When the {@link de.tum.cit.aet.artemis.exam.dto.ExerciseImportDTO}
-     * omitted an override (title/short name), the skeleton's corresponding field is {@code null} and is backfilled here from
-     * {@code source} instead of being persisted blank; see the null-vs-default caveat below for the two overrides where this
-     * backfill is NOT possible.
+     * The client-editable overrides already present on the skeleton (title, short name, max points, bonus points and the
+     * target exercise group) are intentionally NOT overwritten when present. When the
+     * {@link de.tum.cit.aet.artemis.exam.dto.ExerciseImportDTO} omitted an override, the skeleton's corresponding field is
+     * {@code null} and is backfilled here from {@code source} instead of being persisted blank (source-first +
+     * non-null-override); see {@link #backfillOmittedBasisOverridesFromSource}.
      * <p>
      * Grading criteria are passed in explicitly rather than read off {@code source}: the callers load them with a separate
      * query (join-fetching them together with the competency links would produce a row cartesian product), and reading
@@ -614,32 +614,13 @@ public class ExamImportService {
      * criterion's {@code exercise} back-reference to point at the skeleton). That is intended here — the skeleton is the
      * exercise that will be imported — and is safe because callers pass a freshly loaded, detached criteria set, never the
      * source's live managed collection.
-     * <p>
-     * KNOWN LIMITATION (maxPoints / bonusPoints): unlike title/shortName, an omitted {@code maxPoints}/{@code bonusPoints}
-     * override cannot be distinguished from a DTO that explicitly requested the default. {@link BaseExercise} initializes
-     * both fields to non-null defaults (1.0 / 0.0), and {@code ExerciseImportDTO#toEntity} only calls the setter when the
-     * DTO component is non-null; either way the skeleton ends up holding a non-null value (the override, or the untouched
-     * field initializer), so a null-check here cannot tell "omitted" apart from "explicitly requested 1.0/0.0". Falling back
-     * whenever the skeleton value equals the default would risk silently discarding a real client override that happens to
-     * match it. Fixing this properly requires threading the DTO's nullable {@code maxPoints}/{@code bonusPoints} through to
-     * this merge (the DTO itself is not reachable here — it is fully consumed into the entity tree by
-     * {@code ExamImportDTO#toEntity} before {@link #addExercisesToExerciseGroup} runs), so for now the source's points are
-     * NOT backfilled and a request that omits them will persist the BaseExercise defaults.
      *
      * @param source                the DB-loaded source exercise with its basis details eagerly fetched
      * @param skeleton              the exam-import skeleton to enrich in place
      * @param sourceGradingCriteria the source's grading criteria, loaded separately by the caller (reparented onto the skeleton)
      */
     private static void copyExerciseDetailsForExamImport(final Exercise source, final Exercise skeleton, final Set<GradingCriterion> sourceGradingCriteria) {
-        // ExerciseImportDTO#toEntity only calls setTitle/setShortName when the DTO component is non-null, so a null here
-        // unambiguously means the import request omitted the override (BaseExercise has no non-null field initializer for
-        // either). Back-fill from the source instead of persisting a blank title/short name.
-        if (skeleton.getTitle() == null) {
-            skeleton.setTitle(source.getTitle());
-        }
-        if (skeleton.getShortName() == null) {
-            skeleton.setShortName(source.getShortName());
-        }
+        backfillOmittedBasisOverridesFromSource(skeleton, source);
         skeleton.setProblemStatement(source.getProblemStatement());
         skeleton.setDifficulty(source.getDifficulty());
         skeleton.setAssessmentType(source.getAssessmentType());
@@ -655,6 +636,37 @@ public class ExamImportService {
     }
 
     /**
+     * Applies the client-editable "basis" overrides (title, short name, max points, bonus points) to the exam-import
+     * skeleton with source-first + non-null-override precedence: a value the client supplied on the skeleton wins, and an
+     * omitted override (a {@code null} skeleton field) is backfilled from the reloaded DB source exercise.
+     * <p>
+     * This is how the nullable {@link de.tum.cit.aet.artemis.exam.dto.ExerciseImportDTO} components reach the merge:
+     * {@code ExerciseImportDTO#toEntity} sets these four fields unconditionally, so an omitted override is faithfully
+     * carried here as {@code null} (rather than the non-null {@link BaseExercise} defaults 1.0 / 0.0 that a guarded setter
+     * would leave). A null therefore unambiguously means "override omitted" and is filled from {@code source} instead of
+     * persisting a blank title / short name or the BaseExercise point defaults. This also keeps the entity-shaped
+     * course-to-course import a no-op: those skeletons are real source exercises whose four fields are already non-null and
+     * are consequently kept as-is.
+     *
+     * @param skeleton the exam-import skeleton to enrich in place
+     * @param source   the DB-loaded source exercise the omitted overrides are backfilled from
+     */
+    private static void backfillOmittedBasisOverridesFromSource(final Exercise skeleton, final Exercise source) {
+        if (skeleton.getTitle() == null) {
+            skeleton.setTitle(source.getTitle());
+        }
+        if (skeleton.getShortName() == null) {
+            skeleton.setShortName(source.getShortName());
+        }
+        if (skeleton.getMaxPoints() == null) {
+            skeleton.setMaxPoints(source.getMaxPoints());
+        }
+        if (skeleton.getBonusPoints() == null) {
+            skeleton.setBonusPoints(source.getBonusPoints());
+        }
+    }
+
+    /**
      * Copies programming-specific fields that are not part of {@link de.tum.cit.aet.artemis.exam.dto.ExerciseImportDTO}.
      * The DTO intentionally only carries generic exercise fields and possible overrides such as title, short name, and points.
      *
@@ -662,6 +674,9 @@ public class ExamImportService {
      * @param newExercise      the exam-import skeleton created from {@link de.tum.cit.aet.artemis.exam.dto.ExerciseImportDTO}
      */
     static void copyProgrammingExerciseInformationForExamImport(final ProgrammingExercise originalExercise, final ProgrammingExercise newExercise) {
+        // Programming exercises do not go through copyExerciseDetailsForExamImport, so apply the same source-first +
+        // non-null-override basis handling here (an omitted title/short name/points override falls back to the source).
+        backfillOmittedBasisOverridesFromSource(newExercise, originalExercise);
         newExercise.setProgrammingLanguage(originalExercise.getProgrammingLanguage());
         newExercise.setProjectType(originalExercise.getProjectType());
         newExercise.setPackageName(originalExercise.getPackageName());
