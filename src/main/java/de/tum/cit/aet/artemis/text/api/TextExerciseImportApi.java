@@ -39,14 +39,16 @@ public class TextExerciseImportApi extends AbstractTextApi {
     }
 
     /**
-     * Loads the source text exercise with the basis details (grading criteria, competency links, plagiarism
-     * detection config) needed to preserve them during exam import.
+     * Loads the source text exercise with its competency links, needed to preserve them during exam import. The grading
+     * criteria are loaded separately by the caller (see ExamImportService), and the plagiarism detection config is
+     * intentionally not loaded because exam exercises are non-course exercises whose plagiarism config is nulled on
+     * import.
      *
      * @param sourceExerciseId the id of the source exercise
-     * @return the source exercise with its basis details, or empty if it no longer exists
+     * @return the source exercise with its competency links, or empty if it no longer exists
      */
     public Optional<TextExercise> findWithExamImportBasisById(long sourceExerciseId) {
-        return textExerciseRepository.findWithGradingCriteriaCompetenciesAndPlagiarismDetectionConfigById(sourceExerciseId);
+        return textExerciseRepository.findWithCompetencyLinksById(sourceExerciseId);
     }
 
     public Optional<TextExercise> importTextExercise(final long templateExerciseId, final TextExercise exerciseToCopy) {

@@ -79,17 +79,18 @@ public interface FileUploadExerciseRepository extends ArtemisJpaRepository<FileU
     Optional<FileUploadExercise> findForVersioningById(long exerciseId);
 
     /**
-     * Finds a file upload exercise together with the lazily-loaded "basis" details that are needed to preserve exercise
-     * content during exam import (competency links and the plagiarism detection config). The grading criteria are
-     * intentionally NOT join-fetched here: fetching two independent {@code Set} collections (competencyLinks and
-     * gradingCriteria) in a single query produces a row cartesian product. The caller loads the grading criteria with a
-     * separate query instead. These details are otherwise lost because the exam-import skeleton is built from a slim DTO.
+     * Finds a file upload exercise together with its lazily-loaded competency links, needed to preserve them during exam
+     * import (they would otherwise be lost because the exam-import skeleton is built from a slim DTO). The grading
+     * criteria are intentionally NOT join-fetched here: fetching two independent {@code Set} collections (competencyLinks
+     * and gradingCriteria) in a single query produces a row cartesian product, so the caller loads the grading criteria
+     * with a separate query instead. The plagiarism detection config is not fetched either: exam exercises are non-course
+     * exercises whose plagiarism config is nulled on import (see ExamImportService#copyExerciseDetailsForExamImport).
      *
      * @param exerciseId the id of the source exercise
-     * @return the exercise with its competency links and plagiarism detection config, or empty if not found
+     * @return the exercise with its competency links, or empty if not found
      */
-    @EntityGraph(type = LOAD, attributePaths = { "competencyLinks.competency", "plagiarismDetectionConfig" })
-    Optional<FileUploadExercise> findWithGradingCriteriaCompetenciesAndPlagiarismDetectionConfigById(long exerciseId);
+    @EntityGraph(type = LOAD, attributePaths = { "competencyLinks.competency" })
+    Optional<FileUploadExercise> findWithCompetencyLinksById(long exerciseId);
 
     /**
      * Finds a file upload exercise by its title and course id and throws a NoUniqueQueryException if multiple exercises are found.

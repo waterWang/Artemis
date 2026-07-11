@@ -306,16 +306,18 @@ class ExerciseGroupIntegrationJenkinsLocalVCTest extends AbstractSpringIntegrati
         }
 
         // Basis-preservation regression fence: the imported text exercise (index 6: modelling, text, file upload, quiz)
-        // must keep the source's details (problem statement, grading criteria, plagiarism config). The exam import now
-        // reloads these from the DB source, which must remain a no-op for the entity-shaped import-exercise-group path
-        // whose request body already carries the full exercises.
+        // must keep the source's details (problem statement, grading criteria). The exam import now reloads these from the
+        // DB source, which must remain a no-op for the entity-shaped import-exercise-group path whose request body already
+        // carries the full exercises.
         Exercise importedTextExercise = listReceived.get(6).getExercises().iterator().next();
-        TextExercise reloadedImportedText = textExerciseRepository.findWithGradingCriteriaCompetenciesAndPlagiarismDetectionConfigById(importedTextExercise.getId()).orElseThrow();
+        TextExercise reloadedImportedText = textExerciseRepository.findWithCompetencyLinksById(importedTextExercise.getId()).orElseThrow();
         assertThat(reloadedImportedText.getProblemStatement()).isEqualTo("Exam Problem Statement");
         // Grading criteria are loaded with a separate query (the reload query intentionally no longer join-fetches them
         // together with the competency links, to avoid a Set x Set row cartesian product).
         assertThat(gradingCriterionRepository.findByExerciseIdWithEagerGradingCriteria(reloadedImportedText.getId())).isNotEmpty();
-        assertThat(reloadedImportedText.getPlagiarismDetectionConfig()).isNotNull();
+        // Exam exercises are non-course exercises: the plagiarism detection config is deliberately nulled on import
+        // (mirroring the programming exam-import invariant).
+        assertThat(reloadedImportedText.getPlagiarismDetectionConfig()).isNull();
     }
 
     @Test

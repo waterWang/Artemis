@@ -37,6 +37,13 @@ public record ExerciseImportDTO(@NotNull Long id, @NotNull ExerciseType exercise
     /**
      * Creates a skeleton Exercise entity from this DTO.
      * The actual exercise import will use the ID to look up the source exercise.
+     * <p>
+     * WARNING: the returned skeleton carries ONLY this DTO's six fields (id, exercise type, and the optional overrides
+     * title, short name, max points and bonus points). It is intentionally missing every other exercise "basis" detail
+     * (problem statement, difficulty, grading instructions/criteria, competency links, and the per-type content). It MUST
+     * be enriched from the reloaded DB source exercise via
+     * {@code ExamImportService#copyExerciseDetailsForExamImport} (plus the per-type detail copies) before being passed to
+     * any import service, otherwise those basis fields are silently lost.
      *
      * @return a new Exercise entity with basic properties set
      */

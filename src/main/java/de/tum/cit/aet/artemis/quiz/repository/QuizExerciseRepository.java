@@ -70,18 +70,6 @@ public interface QuizExerciseRepository extends ArtemisJpaRepository<QuizExercis
             "quizBatches", "gradingCriteria" })
     Optional<QuizExercise> findWithEagerQuestionsAndStatisticsAndCompetenciesAndBatchesAndGradingCriteriaById(Long quizExerciseId);
 
-    /**
-     * Same as {@link #findWithEagerQuestionsAndStatisticsAndCompetenciesAndBatchesAndGradingCriteriaById(Long)} but also
-     * eagerly loads the plagiarism detection config. Used by the exam import to preserve the source quiz's basis details
-     * (grading criteria, competency links and plagiarism detection config) that the exam-import skeleton does not carry.
-     *
-     * @param quizExerciseId the id of the source quiz exercise
-     * @return the quiz exercise with questions, statistics, competencies, batches, grading criteria and plagiarism detection config, or empty if not found
-     */
-    @EntityGraph(type = LOAD, attributePaths = { "quizQuestions", "quizPointStatistic", "quizQuestions.quizQuestionStatistic", "categories", "competencyLinks.competency",
-            "quizBatches", "gradingCriteria", "plagiarismDetectionConfig" })
-    Optional<QuizExercise> findWithEagerQuestionsAndStatisticsAndCompetenciesAndBatchesAndGradingCriteriaAndPlagiarismDetectionConfigById(Long quizExerciseId);
-
     @EntityGraph(type = LOAD, attributePaths = { "quizQuestions" })
     Optional<QuizExercise> findWithEagerQuestionsById(Long quizExerciseId);
 

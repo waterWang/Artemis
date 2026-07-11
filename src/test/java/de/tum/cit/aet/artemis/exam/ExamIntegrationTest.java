@@ -2271,7 +2271,7 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
 
         Exam importedExam = examRepository.findWithExerciseGroupsAndExercisesByIdOrElseThrow(received.getId());
         Exercise importedModeling = importedExam.getExerciseGroups().getFirst().getExercises().iterator().next();
-        ModelingExercise reloaded = modelingExerciseRepository.findWithGradingCriteriaCompetenciesAndPlagiarismDetectionConfigById(importedModeling.getId()).orElseThrow();
+        ModelingExercise reloaded = modelingExerciseRepository.findWithCompetencyLinksById(importedModeling.getId()).orElseThrow();
 
         // The edited title and points (client overrides) win.
         assertThat(reloaded.getTitle()).isEqualTo(editedTitle);
@@ -2279,7 +2279,9 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
         // The basis details still come from the DB source, not blanked and not overridden.
         assertThat(reloaded.getProblemStatement()).isEqualTo("Preserved problem statement " + ExerciseType.MODELING);
         assertThat(reloaded.getDifficulty()).isEqualTo(DifficultyLevel.HARD);
-        assertThat(reloaded.getPlagiarismDetectionConfig()).isNotNull();
+        // Exam exercises are non-course exercises: the plagiarism detection config is deliberately nulled on import
+        // (mirroring the programming exam-import invariant), even though the source carried one.
+        assertThat(reloaded.getPlagiarismDetectionConfig()).isNull();
         // Grading criteria are loaded with a separate query (the reload query intentionally no longer join-fetches them).
         assertThat(gradingCriterionRepository.findByExerciseIdWithEagerGradingCriteria(reloaded.getId())).hasSize(1);
     }
@@ -2297,6 +2299,8 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
         Set<GradingCriterion> criteria = new HashSet<>();
         criteria.add(criterion);
         sourceExercise.setGradingCriteria(criteria);
+        // Set a plagiarism config on the SOURCE so the import assertions can prove it is deliberately nulled on the
+        // imported exam exercise (exam exercises are non-course exercises; plagiarism config is not carried over).
         sourceExercise.setPlagiarismDetectionConfig(new PlagiarismDetectionConfig());
         // Subtype scalar fields that are read off the exam-import skeleton by the per-type import services. These are not
         // part of the slim ExamImportDTO, so they must be reloaded from the DB source during import (regression fence).
@@ -2317,11 +2321,10 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
     private void assertImportedExerciseBasisPreserved(Exercise imported) {
         ExerciseType type = imported.getExerciseType();
         Exercise reloaded = switch (type) {
-            case MODELING -> modelingExerciseRepository.findWithGradingCriteriaCompetenciesAndPlagiarismDetectionConfigById(imported.getId()).orElseThrow();
-            case TEXT -> textExerciseRepository.findWithGradingCriteriaCompetenciesAndPlagiarismDetectionConfigById(imported.getId()).orElseThrow();
-            case FILE_UPLOAD -> fileUploadExerciseRepository.findWithGradingCriteriaCompetenciesAndPlagiarismDetectionConfigById(imported.getId()).orElseThrow();
-            case QUIZ -> quizExerciseRepository.findWithEagerQuestionsAndStatisticsAndCompetenciesAndBatchesAndGradingCriteriaAndPlagiarismDetectionConfigById(imported.getId())
-                    .orElseThrow();
+            case MODELING -> modelingExerciseRepository.findWithCompetencyLinksById(imported.getId()).orElseThrow();
+            case TEXT -> textExerciseRepository.findWithCompetencyLinksById(imported.getId()).orElseThrow();
+            case FILE_UPLOAD -> fileUploadExerciseRepository.findWithCompetencyLinksById(imported.getId()).orElseThrow();
+            case QUIZ -> quizExerciseRepository.findWithEagerQuestionsAndStatisticsAndCompetenciesAndBatchesAndGradingCriteriaById(imported.getId()).orElseThrow();
             default -> throw new IllegalStateException("Unexpected exercise type in exam import test: " + type);
         };
         assertThat(reloaded.getProblemStatement()).as("problem statement preserved for %s", type).isEqualTo("Preserved problem statement " + type);
@@ -2332,7 +2335,10 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
         Set<GradingCriterion> gradingCriteria = gradingCriterionRepository.findByExerciseIdWithEagerGradingCriteria(reloaded.getId());
         assertThat(gradingCriteria).as("grading criteria preserved for %s", type).hasSize(1);
         assertThat(gradingCriteria.iterator().next().getTitle()).as("grading criterion title preserved for %s", type).isEqualTo("Preserved criterion " + type);
-        assertThat(reloaded.getPlagiarismDetectionConfig()).as("plagiarism detection config preserved for %s", type).isNotNull();
+        // Exam exercises are non-course exercises: the plagiarism detection config is deliberately nulled on import
+        // (mirroring the programming exam-import invariant), even though the source carried one (see
+        // enrichSourceExerciseWithBasisDetails).
+        assertThat(reloaded.getPlagiarismDetectionConfig()).as("plagiarism detection config nulled on exam import for %s", type).isNull();
         if (reloaded instanceof ModelingExercise modeling) {
             assertThat(modeling.getDiagramType()).as("modeling diagram type preserved").isEqualTo(DiagramType.ClassDiagram);
             assertThat(modeling.getExampleSolutionModel()).as("modeling example solution model preserved").isEqualTo("This is my example solution model");
@@ -2491,13 +2497,12 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
         QuizExercise importedQuiz = (QuizExercise) importedExam.getExerciseGroups().getFirst().getExercises().iterator().next();
 
         // The imported quiz has NO competency links (deliberately dropped).
-        QuizExercise reloadedImported = quizExerciseRepository
-                .findWithEagerQuestionsAndStatisticsAndCompetenciesAndBatchesAndGradingCriteriaAndPlagiarismDetectionConfigById(importedQuiz.getId()).orElseThrow();
+        QuizExercise reloadedImported = quizExerciseRepository.findWithEagerQuestionsAndStatisticsAndCompetenciesAndBatchesAndGradingCriteriaById(importedQuiz.getId())
+                .orElseThrow();
         assertThat(reloadedImported.getCompetencyLinks()).as("imported quiz must not carry competency links").isEmpty();
 
         // The source quiz still has its competency link (untouched by the import).
-        QuizExercise reloadedSource = quizExerciseRepository
-                .findWithEagerQuestionsAndStatisticsAndCompetenciesAndBatchesAndGradingCriteriaAndPlagiarismDetectionConfigById(sourceQuizId).orElseThrow();
+        QuizExercise reloadedSource = quizExerciseRepository.findWithEagerQuestionsAndStatisticsAndCompetenciesAndBatchesAndGradingCriteriaById(sourceQuizId).orElseThrow();
         assertThat(reloadedSource.getCompetencyLinks()).as("source quiz competency links must be untouched").hasSize(1);
     }
 
