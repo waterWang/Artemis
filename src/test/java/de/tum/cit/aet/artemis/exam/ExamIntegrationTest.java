@@ -2108,8 +2108,10 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
 
         exam.setChannelName("channelname-imported");
         ExamImportDTO importDTO = ExamImportDTO.of(exam, course1.getId());
-        final Exam received = request.postWithResponseBody("/api/exam/courses/" + course1.getId() + "/exam-import", importDTO, ExamImportResultDTO.class, HttpStatus.CREATED)
-                .exam();
+        // The import response carries only the imported exam's id/title; re-fetch the persisted exam to assert its state.
+        Long importedExamId = request.postWithResponseBody("/api/exam/courses/" + course1.getId() + "/exam-import", importDTO, ExamImportResultDTO.class, HttpStatus.CREATED).exam()
+                .id();
+        final Exam received = examRepository.findWithExerciseGroupsAndExercisesByIdOrElseThrow(importedExamId);
         assertThat(received.getId()).isNotNull();
         assertThat(received.getTitle()).isEqualTo(exam.getTitle());
         assertThat(received.isTestExam()).isFalse();
@@ -2141,7 +2143,8 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
         Exam exam = examUtilService.addExamWithModellingAndTextAndFileUploadAndQuizAndEmptyGroup(course1);
         exam.setChannelName("testchannelname-imported");
         ExamImportDTO importDTO2 = ExamImportDTO.of(exam, course1.getId());
-        final Exam received = request.postWithResponseBody("/api/exam/courses/" + course1.getId() + "/exam-import", importDTO2, ExamImportResultDTO.class, CREATED).exam();
+        Long importedExamId = request.postWithResponseBody("/api/exam/courses/" + course1.getId() + "/exam-import", importDTO2, ExamImportResultDTO.class, CREATED).exam().id();
+        final Exam received = examRepository.findWithExerciseGroupsAndExercisesByIdOrElseThrow(importedExamId);
         assertThat(received.getId()).isNotNull();
         assertThat(received.getTitle()).isEqualTo(exam.getTitle());
         assertThat(received.getCourse()).isEqualTo(course1);
@@ -2223,7 +2226,7 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
         assertThat(result.incompleteExercises()).as("no exercise must be reported as incomplete").isNullOrEmpty();
 
         // Re-fetch the created exam (its id is in the response body) and verify the persisted state.
-        Exam importedExam = examRepository.findWithExerciseGroupsAndExercisesByIdOrElseThrow(result.exam().getId());
+        Exam importedExam = examRepository.findWithExerciseGroupsAndExercisesByIdOrElseThrow(result.exam().id());
 
         // All exercises except the failing quiz were imported (modelling, text, file upload).
         long importedExerciseCount = importedExam.getExerciseGroups().stream().mapToLong(group -> group.getExercises().size()).sum();
@@ -2262,7 +2265,7 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
         assertThat(result.skippedExercises()).as("the skipped text exercise must be reported").contains(textTitle);
 
         // Re-fetch the created exam: the emptied middle group is retained and the ordered list contains no null element.
-        Exam importedExam = examRepository.findWithExerciseGroupsAndExercisesByIdOrElseThrow(result.exam().getId());
+        Exam importedExam = examRepository.findWithExerciseGroupsAndExercisesByIdOrElseThrow(result.exam().id());
         assertThat(importedExam.getExerciseGroups()).as("all imported groups are retained, including the emptied middle one").hasSize(4);
         assertThat(importedExam.getExerciseGroups()).as("the ordered exercise-group list must not contain a null").doesNotContainNull();
         assertThat(importedExam.getExerciseGroups()).filteredOn(group -> group.getExercises().isEmpty()).as("the emptied text group is retained").hasSize(1);
@@ -2296,15 +2299,13 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
         exerciseRepository.save(quiz);
 
         ExamImportDTO quizImportDTO = ExamImportDTO.of(exam, course1.getId());
-        final Exam received = request.postWithResponseBody("/api/exam/courses/" + course1.getId() + "/exam-import", quizImportDTO, ExamImportResultDTO.class, CREATED).exam();
+        Long importedExamId = request.postWithResponseBody("/api/exam/courses/" + course1.getId() + "/exam-import", quizImportDTO, ExamImportResultDTO.class, CREATED).exam().id();
+        Exam received = examRepository.findWithExerciseGroupsAndExercisesByIdOrElseThrow(importedExamId);
         assertThat(received.getExerciseGroups()).hasSize(1);
 
         ExerciseGroup receivedGroup = received.getExerciseGroups().getFirst();
         assertThat(receivedGroup.getExercises()).hasSize(1);
         QuizExercise exercise = (QuizExercise) receivedGroup.getExercises().iterator().next();
-
-        // The directly returned exam should not contain details like the quiz questions
-        assertThat(exercise.getQuizQuestions()).isEmpty();
 
         exercise = quizExerciseRepository.findByIdWithQuestionsElseThrow(exercise.getId());
         // Quiz questions should get imported into the exam
@@ -2320,8 +2321,9 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
         exam.setChannelName("testchannelname");
 
         ExamImportDTO otherCourseImportDTO = ExamImportDTO.of(exam, course1.getId());
-        final Exam received = request.postWithResponseBody("/api/exam/courses/" + course1.getId() + "/exam-import", otherCourseImportDTO, ExamImportResultDTO.class, CREATED)
-                .exam();
+        Long importedExamId = request.postWithResponseBody("/api/exam/courses/" + course1.getId() + "/exam-import", otherCourseImportDTO, ExamImportResultDTO.class, CREATED).exam()
+                .id();
+        final Exam received = examRepository.findWithExerciseGroupsAndExercisesByIdOrElseThrow(importedExamId);
         assertThat(received.getExerciseGroups()).hasSize(5);
 
         for (int i = 0; i <= 4; i++) {
