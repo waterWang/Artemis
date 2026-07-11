@@ -602,7 +602,10 @@ public class ExamImportService {
      * values from it and silently drop the exercise content for MODELING/TEXT/FILE_UPLOAD/QUIZ exam exercises.
      * <p>
      * The client-editable overrides already present on the skeleton (title, short name, points and the target exercise
-     * group) are intentionally NOT overwritten.
+     * group) are intentionally NOT overwritten when present. When the {@link de.tum.cit.aet.artemis.exam.dto.ExerciseImportDTO}
+     * omitted an override (title/short name), the skeleton's corresponding field is {@code null} and is backfilled here from
+     * {@code source} instead of being persisted blank; see the null-vs-default caveat below for the two overrides where this
+     * backfill is NOT possible.
      * <p>
      * Grading criteria are passed in explicitly rather than read off {@code source}: the callers load them with a separate
      * query (join-fetching them together with the competency links would produce a row cartesian product), and reading
@@ -611,12 +614,32 @@ public class ExamImportService {
      * criterion's {@code exercise} back-reference to point at the skeleton). That is intended here — the skeleton is the
      * exercise that will be imported — and is safe because callers pass a freshly loaded, detached criteria set, never the
      * source's live managed collection.
+     * <p>
+     * KNOWN LIMITATION (maxPoints / bonusPoints): unlike title/shortName, an omitted {@code maxPoints}/{@code bonusPoints}
+     * override cannot be distinguished from a DTO that explicitly requested the default. {@link BaseExercise} initializes
+     * both fields to non-null defaults (1.0 / 0.0), and {@code ExerciseImportDTO#toEntity} only calls the setter when the
+     * DTO component is non-null; either way the skeleton ends up holding a non-null value (the override, or the untouched
+     * field initializer), so a null-check here cannot tell "omitted" apart from "explicitly requested 1.0/0.0". Falling back
+     * whenever the skeleton value equals the default would risk silently discarding a real client override that happens to
+     * match it. Fixing this properly requires threading the DTO's nullable {@code maxPoints}/{@code bonusPoints} through to
+     * this merge (the DTO itself is not reachable here — it is fully consumed into the entity tree by
+     * {@code ExamImportDTO#toEntity} before {@link #addExercisesToExerciseGroup} runs), so for now the source's points are
+     * NOT backfilled and a request that omits them will persist the BaseExercise defaults.
      *
      * @param source                the DB-loaded source exercise with its basis details eagerly fetched
      * @param skeleton              the exam-import skeleton to enrich in place
      * @param sourceGradingCriteria the source's grading criteria, loaded separately by the caller (reparented onto the skeleton)
      */
     private static void copyExerciseDetailsForExamImport(final Exercise source, final Exercise skeleton, final Set<GradingCriterion> sourceGradingCriteria) {
+        // ExerciseImportDTO#toEntity only calls setTitle/setShortName when the DTO component is non-null, so a null here
+        // unambiguously means the import request omitted the override (BaseExercise has no non-null field initializer for
+        // either). Back-fill from the source instead of persisting a blank title/short name.
+        if (skeleton.getTitle() == null) {
+            skeleton.setTitle(source.getTitle());
+        }
+        if (skeleton.getShortName() == null) {
+            skeleton.setShortName(source.getShortName());
+        }
         skeleton.setProblemStatement(source.getProblemStatement());
         skeleton.setDifficulty(source.getDifficulty());
         skeleton.setAssessmentType(source.getAssessmentType());

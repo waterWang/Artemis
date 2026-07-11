@@ -79,6 +79,8 @@ import de.tum.cit.aet.artemis.exam.dto.ExamSessionDTO;
 import de.tum.cit.aet.artemis.exam.dto.ExamSidebarDataDTO;
 import de.tum.cit.aet.artemis.exam.dto.ExamUpdateDTO;
 import de.tum.cit.aet.artemis.exam.dto.ExamWithIdAndCourseDTO;
+import de.tum.cit.aet.artemis.exam.dto.ExerciseGroupImportDTO;
+import de.tum.cit.aet.artemis.exam.dto.ExerciseImportDTO;
 import de.tum.cit.aet.artemis.exam.dto.SuspiciousExamSessionsDTO;
 import de.tum.cit.aet.artemis.exam.repository.ExamUserRepository;
 import de.tum.cit.aet.artemis.exam.service.ExamDateService;
@@ -2284,6 +2286,46 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
         assertThat(reloaded.getPlagiarismDetectionConfig()).isNull();
         // Grading criteria are loaded with a separate query (the reload query intentionally no longer join-fetches them).
         assertThat(gradingCriterionRepository.findByExerciseIdWithEagerGradingCriteria(reloaded.getId())).hasSize(1);
+    }
+
+    @Test
+    @WithMockUser(username = TEST_PREFIX + "instructor1", roles = "INSTRUCTOR")
+    void testImportExamWithExercises_fallsBackToSourceTitleWhenOverridesOmitted() throws Exception {
+        // Regression fence: ExerciseImportDTO's title/shortName/maxPoints/bonusPoints overrides are @Nullable. A minimal,
+        // spec-compliant client request that only sends id + exerciseType (omitting the overrides, as ExerciseImportDTO.of()
+        // never does but the contract technically allows) must not persist a blank-title copy of the source exercise.
+        Exam exam = examUtilService.addExamWithModellingAndTextAndFileUploadAndQuizAndEmptyGroup(course1);
+        Exercise sourceModeling = exam.getExerciseGroups().getFirst().getExercises().iterator().next();
+        sourceModeling.setTitle("Source modeling title");
+        sourceModeling.setMaxPoints(17.0);
+        sourceModeling.setBonusPoints(3.0);
+        exerciseRepository.save(sourceModeling);
+
+        // Build a minimal ExerciseImportDTO carrying only id + exerciseType; title/shortName/maxPoints/bonusPoints are left
+        // null, exactly as a spec-compliant-but-minimal client request would look.
+        ExerciseImportDTO minimalExerciseDTO = new ExerciseImportDTO(sourceModeling.getId(), sourceModeling.getExerciseType(), null, null, null, null);
+        ExerciseGroupImportDTO groupDTO = new ExerciseGroupImportDTO("Group 0", true, List.of(minimalExerciseDTO));
+        ExamImportDTO importDTO = new ExamImportDTO(exam.getTitle(), exam.isTestExam(), exam.isExamWithAttendanceCheck(), exam.getVisibleDate(), exam.getStartDate(),
+                exam.getEndDate(), exam.getPublishResultsDate(), exam.getExamStudentReviewStart(), exam.getExamStudentReviewEnd(), exam.getGracePeriod(), exam.getWorkingTime(),
+                exam.getStartText(), exam.getEndText(), exam.getConfirmationStartText(), exam.getConfirmationEndText(), exam.getExamMaxPoints(), exam.getRandomizeExerciseOrder(),
+                exam.getNumberOfExercisesInExam(), exam.getNumberOfCorrectionRoundsInExam(), exam.getExaminer(), exam.getModuleNumber(), exam.getCourseName(),
+                exam.getExampleSolutionPublicationDate(), exam.getChannelName(), course1.getId(), List.of(groupDTO));
+
+        Exam received = request.postWithResponseBody("/api/exam/courses/" + course1.getId() + "/exam-import", importDTO, ExamImportResultDTO.class, CREATED).exam();
+
+        Exam importedExam = examRepository.findWithExerciseGroupsAndExercisesByIdOrElseThrow(received.getId());
+        assertThat(importedExam.getExerciseGroups()).hasSize(1);
+        Exercise importedModeling = importedExam.getExerciseGroups().getFirst().getExercises().iterator().next();
+        ModelingExercise reloaded = modelingExerciseRepository.findWithCompetencyLinksById(importedModeling.getId()).orElseThrow();
+
+        // title is distinguishable from "omitted" on the skeleton (it has no non-null field initializer), so the merge
+        // falls back to the source's value instead of persisting a blank title.
+        assertThat(reloaded.getTitle()).isEqualTo("Source modeling title");
+        // Documented, known limitation (see copyExerciseDetailsForExamImport): BaseExercise defaults maxPoints/bonusPoints to
+        // 1.0/0.0, and an omitted override is indistinguishable on the skeleton from a DTO that explicitly requested those
+        // exact defaults, so the merge does NOT fall back to the source's points here; the BaseExercise defaults persist.
+        assertThat(reloaded.getMaxPoints()).isEqualTo(1.0);
+        assertThat(reloaded.getBonusPoints()).isEqualTo(0.0);
     }
 
     /**
