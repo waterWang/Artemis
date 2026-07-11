@@ -52,7 +52,10 @@ import de.tum.cit.aet.artemis.account.domain.User;
 import de.tum.cit.aet.artemis.account.service.user.PasswordService;
 import de.tum.cit.aet.artemis.account.util.UserFactory;
 import de.tum.cit.aet.artemis.assessment.domain.GradingCriterion;
+import de.tum.cit.aet.artemis.assessment.repository.GradingCriterionRepository;
 import de.tum.cit.aet.artemis.assessment.service.ParticipantScoreScheduleService;
+import de.tum.cit.aet.artemis.atlas.competency.util.CompetencyUtilService;
+import de.tum.cit.aet.artemis.atlas.domain.competency.Competency;
 import de.tum.cit.aet.artemis.communication.domain.conversation.Channel;
 import de.tum.cit.aet.artemis.communication.repository.conversation.ChannelRepository;
 import de.tum.cit.aet.artemis.core.dto.StudentDTO;
@@ -164,6 +167,9 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
     private ExamUtilService examUtilService;
 
     @Autowired
+    private CompetencyUtilService competencyUtilService;
+
+    @Autowired
     private PageableSearchUtilService pageableSearchUtilService;
 
     @Autowired
@@ -180,6 +186,9 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
 
     @Autowired
     private FileUploadExerciseRepository fileUploadExerciseRepository;
+
+    @Autowired
+    private GradingCriterionRepository gradingCriterionRepository;
 
     @Autowired(required = false)
     private WeaviateService weaviateService;
@@ -2242,17 +2251,20 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
     @Test
     @WithMockUser(username = TEST_PREFIX + "instructor1", roles = "INSTRUCTOR")
     void testImportExamWithExercises_appliesEditedTitleOverSourceDetails() throws Exception {
-        // The import dialog lets the instructor edit only the title (and, for programming exercises, the short name).
-        // That client override must win, while every other detail is reloaded from the DB source. This locks in the
-        // precedence: overrides from the skeleton beat the source, basis details come from the source.
+        // The import dialog lets the instructor edit the client-editable overrides carried by the slim ExamImportDTO
+        // (title, points, and for programming exercises the short name). Those overrides must win, while every other
+        // detail is reloaded from the DB source. This locks in the precedence: overrides from the skeleton beat the
+        // source, basis details come from the source.
         Exam exam = examUtilService.addExamWithModellingAndTextAndFileUploadAndQuizAndEmptyGroup(course1);
         Exercise sourceModeling = exam.getExerciseGroups().getFirst().getExercises().iterator().next();
         enrichSourceExerciseWithBasisDetails(sourceModeling);
 
-        // Simulate the instructor editing only the title: change it in-memory (NOT persisted) so the DTO carries the
-        // edited title while the DB source keeps its original title and details.
+        // Simulate the instructor editing the overridable fields (title and points): change them in-memory (NOT persisted)
+        // so the DTO carries the edited values while the DB source keeps its original title/points and its details.
         String editedTitle = "Edited modeling title";
+        double editedPoints = 42.0;
         sourceModeling.setTitle(editedTitle);
+        sourceModeling.setMaxPoints(editedPoints);
         ExamImportDTO importDTO = ExamImportDTO.of(exam, course1.getId());
 
         Exam received = request.postWithResponseBody("/api/exam/courses/" + course1.getId() + "/exam-import", importDTO, ExamImportResultDTO.class, CREATED).exam();
@@ -2261,13 +2273,15 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
         Exercise importedModeling = importedExam.getExerciseGroups().getFirst().getExercises().iterator().next();
         ModelingExercise reloaded = modelingExerciseRepository.findWithGradingCriteriaCompetenciesAndPlagiarismDetectionConfigById(importedModeling.getId()).orElseThrow();
 
-        // The edited title (client override) wins.
+        // The edited title and points (client overrides) win.
         assertThat(reloaded.getTitle()).isEqualTo(editedTitle);
+        assertThat(reloaded.getMaxPoints()).isEqualTo(editedPoints);
         // The basis details still come from the DB source, not blanked and not overridden.
         assertThat(reloaded.getProblemStatement()).isEqualTo("Preserved problem statement " + ExerciseType.MODELING);
         assertThat(reloaded.getDifficulty()).isEqualTo(DifficultyLevel.HARD);
-        assertThat(reloaded.getGradingCriteria()).hasSize(1);
         assertThat(reloaded.getPlagiarismDetectionConfig()).isNotNull();
+        // Grading criteria are loaded with a separate query (the reload query intentionally no longer join-fetches them).
+        assertThat(gradingCriterionRepository.findByExerciseIdWithEagerGradingCriteria(reloaded.getId())).hasSize(1);
     }
 
     /**
@@ -2284,6 +2298,15 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
         criteria.add(criterion);
         sourceExercise.setGradingCriteria(criteria);
         sourceExercise.setPlagiarismDetectionConfig(new PlagiarismDetectionConfig());
+        // Subtype scalar fields that are read off the exam-import skeleton by the per-type import services. These are not
+        // part of the slim ExamImportDTO, so they must be reloaded from the DB source during import (regression fence).
+        if (sourceExercise instanceof TextExercise textExercise) {
+            textExercise.setExampleSolution("Preserved example solution TEXT");
+        }
+        else if (sourceExercise instanceof FileUploadExercise fileUploadExercise) {
+            fileUploadExercise.setFilePattern("pdf,docx");
+            fileUploadExercise.setExampleSolution("Preserved example solution FILE_UPLOAD");
+        }
         exerciseRepository.save(sourceExercise);
     }
 
@@ -2304,12 +2327,22 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
         assertThat(reloaded.getProblemStatement()).as("problem statement preserved for %s", type).isEqualTo("Preserved problem statement " + type);
         assertThat(reloaded.getDifficulty()).as("difficulty preserved for %s", type).isEqualTo(DifficultyLevel.HARD);
         assertThat(reloaded.getGradingInstructions()).as("grading instructions preserved for %s", type).isEqualTo("Preserved grading instructions");
-        assertThat(reloaded.getGradingCriteria()).as("grading criteria preserved for %s", type).hasSize(1);
-        assertThat(reloaded.getGradingCriteria().iterator().next().getTitle()).as("grading criterion title preserved for %s", type).isEqualTo("Preserved criterion " + type);
+        // Grading criteria are loaded with a separate query (the reload query above intentionally no longer join-fetches
+        // them together with the competency links, to avoid a Set x Set row cartesian product).
+        Set<GradingCriterion> gradingCriteria = gradingCriterionRepository.findByExerciseIdWithEagerGradingCriteria(reloaded.getId());
+        assertThat(gradingCriteria).as("grading criteria preserved for %s", type).hasSize(1);
+        assertThat(gradingCriteria.iterator().next().getTitle()).as("grading criterion title preserved for %s", type).isEqualTo("Preserved criterion " + type);
         assertThat(reloaded.getPlagiarismDetectionConfig()).as("plagiarism detection config preserved for %s", type).isNotNull();
         if (reloaded instanceof ModelingExercise modeling) {
             assertThat(modeling.getDiagramType()).as("modeling diagram type preserved").isEqualTo(DiagramType.ClassDiagram);
             assertThat(modeling.getExampleSolutionModel()).as("modeling example solution model preserved").isEqualTo("This is my example solution model");
+        }
+        else if (reloaded instanceof TextExercise text) {
+            assertThat(text.getExampleSolution()).as("text example solution preserved").isEqualTo("Preserved example solution TEXT");
+        }
+        else if (reloaded instanceof FileUploadExercise fileUpload) {
+            assertThat(fileUpload.getFilePattern()).as("file upload file pattern preserved").isEqualTo("pdf,docx");
+            assertThat(fileUpload.getExampleSolution()).as("file upload example solution preserved").isEqualTo("Preserved example solution FILE_UPLOAD");
         }
     }
 
@@ -2427,6 +2460,45 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
         exercise = quizExerciseRepository.findByIdWithQuestionsElseThrow(exercise.getId());
         // Quiz questions should get imported into the exam
         assertThat(exercise.getQuizQuestions()).hasSize(4);
+    }
+
+    @Test
+    @WithMockUser(username = TEST_PREFIX + "instructor1", roles = "INSTRUCTOR")
+    void testImportExamWithQuizExercise_dropsCompetencyLinksAndLeavesSourceUntouched() throws Exception {
+        // Known limitation (regression fence): unlike modeling/text/file-upload (which resolve competency links via
+        // CompetencyExerciseLinkService) and programming (which also drops them), the quiz exam-import path has no
+        // competency-link resolution step. Persisting the source's links on a cross-course import would create links
+        // pointing at the SOURCE course's competencies. The import therefore deliberately drops the quiz's competency
+        // links (matching the pre-existing behavior where the quiz skeleton carried none). This test pins that: the
+        // imported quiz has NO competency links, and the source quiz's link is untouched.
+        Exam exam = examUtilService.addExamWithExerciseGroup(course1, false);
+        ExerciseGroup quizGroup = exam.getExerciseGroups().getFirst();
+        QuizExercise quiz = QuizExerciseFactory.generateQuizExerciseForExam(quizGroup);
+        quiz.addQuestion(QuizExerciseFactory.createSingleChoiceQuestion());
+        quizGroup.addExercise(quiz);
+        quiz = exerciseRepository.save(quiz);
+
+        // Link a source-course competency to the source quiz.
+        Competency competency = competencyUtilService.createCompetency(course1);
+        competencyUtilService.linkExerciseToCompetency(competency, quiz);
+        long sourceQuizId = quiz.getId();
+
+        // Import into a DIFFERENT course (cross-course): persisting the source-course competency links here would be corruption.
+        ExamImportDTO importDTO = ExamImportDTO.of(exam, course2.getId());
+        Exam received = request.postWithResponseBody("/api/exam/courses/" + course2.getId() + "/exam-import", importDTO, ExamImportResultDTO.class, CREATED).exam();
+
+        Exam importedExam = examRepository.findWithExerciseGroupsAndExercisesByIdOrElseThrow(received.getId());
+        QuizExercise importedQuiz = (QuizExercise) importedExam.getExerciseGroups().getFirst().getExercises().iterator().next();
+
+        // The imported quiz has NO competency links (deliberately dropped).
+        QuizExercise reloadedImported = quizExerciseRepository
+                .findWithEagerQuestionsAndStatisticsAndCompetenciesAndBatchesAndGradingCriteriaAndPlagiarismDetectionConfigById(importedQuiz.getId()).orElseThrow();
+        assertThat(reloadedImported.getCompetencyLinks()).as("imported quiz must not carry competency links").isEmpty();
+
+        // The source quiz still has its competency link (untouched by the import).
+        QuizExercise reloadedSource = quizExerciseRepository
+                .findWithEagerQuestionsAndStatisticsAndCompetenciesAndBatchesAndGradingCriteriaAndPlagiarismDetectionConfigById(sourceQuizId).orElseThrow();
+        assertThat(reloadedSource.getCompetencyLinks()).as("source quiz competency links must be untouched").hasSize(1);
     }
 
     @Test

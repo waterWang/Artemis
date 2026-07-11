@@ -22,6 +22,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.test.context.support.WithMockUser;
 
 import de.tum.cit.aet.artemis.account.util.UserUtilService;
+import de.tum.cit.aet.artemis.assessment.repository.GradingCriterionRepository;
 import de.tum.cit.aet.artemis.core.security.Role;
 import de.tum.cit.aet.artemis.core.util.CourseUtilService;
 import de.tum.cit.aet.artemis.course.domain.Course;
@@ -54,6 +55,9 @@ class ExerciseGroupIntegrationJenkinsLocalVCTest extends AbstractSpringIntegrati
 
     @Autowired
     private TextExerciseRepository textExerciseRepository;
+
+    @Autowired
+    private GradingCriterionRepository gradingCriterionRepository;
 
     @Autowired
     private ProgrammingExerciseBuildConfigRepository programmingExerciseBuildConfigRepository;
@@ -308,7 +312,9 @@ class ExerciseGroupIntegrationJenkinsLocalVCTest extends AbstractSpringIntegrati
         Exercise importedTextExercise = listReceived.get(6).getExercises().iterator().next();
         TextExercise reloadedImportedText = textExerciseRepository.findWithGradingCriteriaCompetenciesAndPlagiarismDetectionConfigById(importedTextExercise.getId()).orElseThrow();
         assertThat(reloadedImportedText.getProblemStatement()).isEqualTo("Exam Problem Statement");
-        assertThat(reloadedImportedText.getGradingCriteria()).isNotEmpty();
+        // Grading criteria are loaded with a separate query (the reload query intentionally no longer join-fetches them
+        // together with the competency links, to avoid a Set x Set row cartesian product).
+        assertThat(gradingCriterionRepository.findByExerciseIdWithEagerGradingCriteria(reloadedImportedText.getId())).isNotEmpty();
         assertThat(reloadedImportedText.getPlagiarismDetectionConfig()).isNotNull();
     }
 

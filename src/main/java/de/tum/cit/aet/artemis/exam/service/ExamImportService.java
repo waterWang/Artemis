@@ -419,6 +419,10 @@ public class ExamImportService {
                             yield Optional.empty();
                         }
                         ModelingExercise source = optionalSource.get();
+                        // Load the grading criteria with a separate query instead of join-fetching them together with the
+                        // competency links: fetching two independent Set collections in one query produces a row cartesian
+                        // product. Mirror the programming-exercise import path.
+                        source.setGradingCriteria(gradingCriterionRepository.findByExerciseIdWithEagerGradingCriteria(sourceExerciseId));
                         ModelingExercise modelingSkeleton = (ModelingExercise) exerciseToCopy;
                         copyExerciseDetailsForExamImport(source, modelingSkeleton);
                         // Modeling-specific details that copyModelingExerciseBasis reads from the imported (skeleton) exercise.
@@ -437,8 +441,16 @@ public class ExamImportService {
                         if (optionalSource.isEmpty()) {
                             yield Optional.empty();
                         }
-                        copyExerciseDetailsForExamImport(optionalSource.get(), exerciseToCopy);
-                        yield api.importTextExercise(sourceExerciseId, (TextExercise) exerciseToCopy);
+                        TextExercise source = optionalSource.get();
+                        // Load the grading criteria with a separate query instead of join-fetching them together with the
+                        // competency links: fetching two independent Set collections in one query produces a row cartesian
+                        // product. Mirror the programming-exercise import path.
+                        source.setGradingCriteria(gradingCriterionRepository.findByExerciseIdWithEagerGradingCriteria(sourceExerciseId));
+                        TextExercise textSkeleton = (TextExercise) exerciseToCopy;
+                        copyExerciseDetailsForExamImport(source, textSkeleton);
+                        // Text-specific detail that copyTextExerciseBasis reads from the imported (skeleton) exercise.
+                        textSkeleton.setExampleSolution(source.getExampleSolution());
+                        yield api.importTextExercise(sourceExerciseId, textSkeleton);
                     }
 
                     case PROGRAMMING -> {
@@ -470,8 +482,17 @@ public class ExamImportService {
                         if (optionalSource.isEmpty()) {
                             yield Optional.empty();
                         }
-                        copyExerciseDetailsForExamImport(optionalSource.get(), exerciseToCopy);
-                        yield api.importFileUploadExercise(sourceExerciseId, (FileUploadExercise) exerciseToCopy);
+                        FileUploadExercise source = optionalSource.get();
+                        // Load the grading criteria with a separate query instead of join-fetching them together with the
+                        // competency links: fetching two independent Set collections in one query produces a row cartesian
+                        // product. Mirror the programming-exercise import path.
+                        source.setGradingCriteria(gradingCriterionRepository.findByExerciseIdWithEagerGradingCriteria(sourceExerciseId));
+                        FileUploadExercise fileUploadSkeleton = (FileUploadExercise) exerciseToCopy;
+                        copyExerciseDetailsForExamImport(source, fileUploadSkeleton);
+                        // File-upload-specific details that copyFileUploadExerciseBasis reads from the imported (skeleton) exercise.
+                        fileUploadSkeleton.setFilePattern(source.getFilePattern());
+                        fileUploadSkeleton.setExampleSolution(source.getExampleSolution());
+                        yield api.importFileUploadExercise(sourceExerciseId, fileUploadSkeleton);
                     }
 
                     case QUIZ -> {
@@ -493,6 +514,15 @@ public class ExamImportService {
                         // ExerciseImportDTO, so we copy them from the original before importing.
                         QuizExercise quizSkeleton = (QuizExercise) exerciseToCopy;
                         copyExerciseDetailsForExamImport(originalQuizExercise, quizSkeleton);
+                        // Known limitation: the quiz exam-import path has no competency-link resolution step (unlike
+                        // modeling/text/file-upload, which resolve links via CompetencyExerciseLinkService, and unlike
+                        // programming, which also drops them here). QuizExerciseImportService saves the exercise with the
+                        // links from the skeleton cascaded as-is, which for a cross-course import would persist links
+                        // pointing at the SOURCE course's competencies. Since there is no resolve/skip-cross-course step,
+                        // we deliberately drop the competency links here (matching the pre-existing behavior where the
+                        // quiz skeleton carried no links) rather than persist source-course links. Dropping links is the
+                        // safe minimal fix; adding proper resolution is tracked as future work.
+                        quizSkeleton.setCompetencyLinks(new HashSet<>());
                         quizSkeleton.setQuizQuestions(originalQuizExercise.getQuizQuestions());
                         quizSkeleton.setQuizBatches(originalQuizExercise.getQuizBatches());
                         // Quiz-specific configuration that copyQuizExerciseBasis reads from the imported (skeleton) exercise.
