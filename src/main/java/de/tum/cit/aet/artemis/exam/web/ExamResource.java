@@ -14,6 +14,7 @@ import java.security.Principal;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -103,6 +104,7 @@ import de.tum.cit.aet.artemis.exam.dto.ExamSidebarDataDTO;
 import de.tum.cit.aet.artemis.exam.dto.ExamUpdateDTO;
 import de.tum.cit.aet.artemis.exam.dto.ExamUserDTO;
 import de.tum.cit.aet.artemis.exam.dto.ExamWithIdAndCourseDTO;
+import de.tum.cit.aet.artemis.exam.dto.ExerciseGroupOrderDTO;
 import de.tum.cit.aet.artemis.exam.dto.SuspiciousExamSessionsDTO;
 import de.tum.cit.aet.artemis.exam.dto.examevent.ExamWideAnnouncementEventDTO;
 import de.tum.cit.aet.artemis.exam.repository.ExamRepository;
@@ -1244,8 +1246,8 @@ public class ExamResource {
      */
     @PutMapping("courses/{courseId}/exams/{examId}/exercise-groups-order")
     @EnforceAtLeastEditor
-    public ResponseEntity<List<ExerciseGroup>> updateOrderOfExerciseGroups(@PathVariable Long courseId, @PathVariable Long examId,
-            @RequestBody List<ExerciseGroup> orderedExerciseGroups) {
+    public ResponseEntity<List<ExerciseGroupOrderDTO>> updateOrderOfExerciseGroups(@PathVariable Long courseId, @PathVariable Long examId,
+            @RequestBody List<ExerciseGroupOrderDTO> orderedExerciseGroups) {
         log.debug("REST request to update the order of exercise groups of exam : {}", examId);
 
         examAccessService.checkCourseAndExamAccessForEditorElseThrow(courseId, examId);
@@ -1258,15 +1260,15 @@ public class ExamResource {
         }
 
         // Build a map from ID to managed exercise group for reordering
-        var managedGroupsById = new java.util.HashMap<Long, ExerciseGroup>();
+        var managedGroupsById = new HashMap<Long, ExerciseGroup>();
         for (ExerciseGroup managedGroup : exam.getExerciseGroups()) {
             managedGroupsById.put(managedGroup.getId(), managedGroup);
         }
 
         // Ensure all received exercise groups exist in the exam and build the reordered list using managed entities
-        var reorderedManagedGroups = new java.util.ArrayList<ExerciseGroup>();
-        for (ExerciseGroup exerciseGroup : orderedExerciseGroups) {
-            ExerciseGroup managedGroup = managedGroupsById.get(exerciseGroup.getId());
+        var reorderedManagedGroups = new ArrayList<ExerciseGroup>();
+        for (ExerciseGroupOrderDTO orderEntry : orderedExerciseGroups) {
+            ExerciseGroup managedGroup = managedGroupsById.get(orderEntry.id());
             if (managedGroup == null) {
                 throw new BadRequestAlertException("The exercise group is not related to the exam", ENTITY_NAME, "exerciseGroupNotRelatedToExam");
             }
@@ -1279,8 +1281,12 @@ public class ExamResource {
         exam.getExerciseGroups().addAll(reorderedManagedGroups);
         examRepository.save(exam);
 
-        // Return the original request body as it might contain exercise details (e.g. quiz questions), which would be lost otherwise
-        return ResponseEntity.ok(orderedExerciseGroups);
+        // Return only the persisted order as ids. The client keeps its already-loaded, fully-detailed exercise groups
+        // (quiz questions, template/solution participations, ...) and re-applies this order, so no exercise detail is
+        // lost. Reloading the groups from the database would drop exactly that detail, which is why the previous
+        // implementation echoed the entity request body verbatim.
+        List<ExerciseGroupOrderDTO> orderedResponse = reorderedManagedGroups.stream().map(group -> new ExerciseGroupOrderDTO(group.getId())).toList();
+        return ResponseEntity.ok(orderedResponse);
     }
 
     /**
