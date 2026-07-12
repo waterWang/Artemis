@@ -2110,7 +2110,7 @@ class StudentExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVC
         assertThat(studentExamGradeInfoFromServer.studentResult().overallPointsAchievedInFirstCorrection()).isZero();
         assertThat(studentExamGradeInfoFromServer.studentResult().overallGradeInFirstCorrection()).isNull();
         assertThat(studentExamGradeInfoFromServer.studentResult().gradeWithBonus()).isNull();
-        assertThat(studentExamGradeInfoFromServer.studentExam()).isEqualTo(studentExam);
+        assertThat(studentExamGradeInfoFromServer.studentExam().id()).isEqualTo(studentExam.getId());
 
         var studentExamFromServer = request.get("/api/exam/courses/" + course2.getId() + "/exams/" + exam2.getId() + "/student-exams/" + studentExam.getId() + "/conduction",
                 HttpStatus.OK, StudentExam.class);
@@ -2209,7 +2209,7 @@ class StudentExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVC
         assertThat(studentExamGradeInfoFromServer.studentResult().overallPointsAchievedInFirstCorrection()).isZero();
         assertThat(studentExamGradeInfoFromServer.studentResult().overallGradeInFirstCorrection()).isEqualTo("5.0");
         assertThat(studentExamGradeInfoFromServer.studentResult().gradeWithBonus()).isNull();
-        assertThat(studentExamGradeInfoFromServer.studentExam()).isEqualTo(studentExam);
+        assertThat(studentExamGradeInfoFromServer.studentExam().id()).isEqualTo(studentExam.getId());
 
         var studentExamFromServer = request.get("/api/exam/courses/" + course2.getId() + "/exams/" + exam2.getId() + "/student-exams/" + studentExam.getId() + "/conduction",
                 HttpStatus.OK, StudentExam.class);
@@ -2319,7 +2319,7 @@ class StudentExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVC
         assertThat(studentExamGradeInfoFromServerForUserId.studentResult().overallPointsAchieved())
                 .isEqualTo(studentExamGradeInfoFromServer.studentResult().overallPointsAchieved());
         assertThat(studentExamGradeInfoFromServerForUserId.studentResult().hasPassed()).isEqualTo(studentExamGradeInfoFromServer.studentResult().hasPassed());
-        assertThat(studentExamGradeInfoFromServer.studentExam()).isEqualTo(studentExam);
+        assertThat(studentExamGradeInfoFromServer.studentExam().id()).isEqualTo(studentExam.getId());
     }
 
     @Test
