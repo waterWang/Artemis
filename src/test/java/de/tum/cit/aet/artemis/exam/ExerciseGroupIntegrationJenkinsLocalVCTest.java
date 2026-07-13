@@ -1,6 +1,7 @@
 package de.tum.cit.aet.artemis.exam;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
@@ -514,9 +515,20 @@ class ExerciseGroupIntegrationJenkinsLocalVCTest extends AbstractSpringIntegrati
         assertThat(group.exercises().get(1).exerciseType()).isEqualTo(ExerciseType.FILE_UPLOAD);
         assertThat(group.exercises().get(1).id()).isEqualTo(43L);
 
-        // The current wire field "exerciseType" still binds (the alias is additive, not a replacement).
+        // The current wire field "exerciseType" still binds (the legacy key is additive, not a replacement).
         ExerciseImportDTO current = mapper.readValue("{ \"id\": 7, \"exerciseType\": \"text\" }", ExerciseImportDTO.class);
         assertThat(current.exerciseType()).isEqualTo(ExerciseType.TEXT);
+
+        // Both keys with the SAME value bind fine (a client echoing both keys consistently is harmless).
+        ExerciseImportDTO both = mapper.readValue("{ \"id\": 8, \"type\": \"quiz\", \"exerciseType\": \"quiz\" }", ExerciseImportDTO.class);
+        assertThat(both.exerciseType()).isEqualTo(ExerciseType.QUIZ);
+
+        // Both keys with CONFLICTING values are rejected in BOTH member orders. A plain @JsonAlias would bind whichever
+        // key comes last in the JSON, silently importing the wrong exercise type depending on member order.
+        assertThatThrownBy(() -> mapper.readValue("{ \"id\": 9, \"type\": \"programming\", \"exerciseType\": \"text\" }", ExerciseImportDTO.class))
+                .hasMessageContaining("Conflicting exercise type discriminators");
+        assertThatThrownBy(() -> mapper.readValue("{ \"id\": 9, \"exerciseType\": \"text\", \"type\": \"programming\" }", ExerciseImportDTO.class))
+                .hasMessageContaining("Conflicting exercise type discriminators");
     }
 
     /**
