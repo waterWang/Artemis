@@ -103,7 +103,10 @@ export class ExamImportComponent extends ImportComponent<Exam> implements OnInit
      */
     performImportOfExerciseGroups() {
         const currentExam = this.exam();
-        if (this.subsequentExerciseGroupSelection() && currentExam && this.targetExamId() && this.targetCourseId()) {
+        // capture the signals into consts so TypeScript narrowing applies below (signal calls are not narrowed by the guard)
+        const targetCourseId = this.targetCourseId();
+        const targetExamId = this.targetExamId();
+        if (this.subsequentExerciseGroupSelection() && currentExam && targetExamId && targetCourseId) {
             // The validation of the selected exercises is only called when the user desires to import the exam
             if (!this.examExerciseImportComponent().validateUserInput()) {
                 this.alertService.error('artemisApp.examManagement.exerciseGroup.importModal.invalidExerciseConfiguration');
@@ -120,7 +123,7 @@ export class ExamImportComponent extends ImportComponent<Exam> implements OnInit
             // Send only the slim import descriptors (ids + client overrides). The server reloads every other exercise detail
             // from the DB source, so the entity graph must not travel in the request body.
             const importDTOs = ExamManagementService.convertExerciseGroupsToImportDTO(exerciseGroups);
-            const request$ = this.examManagementService.importExerciseGroup(this.targetCourseId()!, this.targetExamId()!, importDTOs, importId);
+            const request$ = this.examManagementService.importExerciseGroup(targetCourseId, targetExamId, importDTOs, importId);
             this.examImportProgressDialog()
                 .runImport(importId, totalExercises, request$)
                 .then((response: HttpResponse<ExerciseGroupImportResultDTO>) => {
