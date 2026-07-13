@@ -30,7 +30,7 @@ class ShortAnswerSubmittedTextTest {
     }
 
     @Test
-    void beforeEvaluationDTOOmitsDerivedCorrectness() {
+    void shouldOmitDerivedCorrectnessWhenCreatingBeforeEvaluationDTO() {
         shortAnswerSubmittedText.setId(42L);
         shortAnswerSubmittedText.setText("student answer");
         shortAnswerSubmittedText.setIsCorrect(true);
