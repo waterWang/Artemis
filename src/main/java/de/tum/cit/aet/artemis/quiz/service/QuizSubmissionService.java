@@ -51,6 +51,7 @@ import de.tum.cit.aet.artemis.quiz.domain.ShortAnswerSpot;
 import de.tum.cit.aet.artemis.quiz.domain.ShortAnswerSubmittedAnswer;
 import de.tum.cit.aet.artemis.quiz.domain.ShortAnswerSubmittedText;
 import de.tum.cit.aet.artemis.quiz.domain.SubmittedAnswer;
+import de.tum.cit.aet.artemis.quiz.dto.exercise.QuizExerciseStatisticUpdateDTO;
 import de.tum.cit.aet.artemis.quiz.dto.participation.StudentQuizParticipationWithSolutionsDTO;
 import de.tum.cit.aet.artemis.quiz.dto.question.reevaluate.DragAndDropMappingReEvaluateDTO;
 import de.tum.cit.aet.artemis.quiz.dto.submission.QuizSubmissionFromLiveClientDTO;
@@ -227,9 +228,8 @@ public class QuizSubmissionService extends AbstractQuizSubmissionService<QuizSub
             sendQuizResultToUser(quizExerciseId, participation);
         });
         quizStatisticService.recalculateStatistics(quizExercise);
-        // notify users via websocket about new results for the statistics, filter out solution information
-        quizExercise.filterForStatisticWebsocket();
-        websocketMessagingService.sendMessage("/topic/statistic/" + quizExercise.getId(), quizExercise);
+        // Notify users without modifying the persisted quiz aggregate to redact solutions.
+        websocketMessagingService.sendMessage("/topic/statistic/" + quizExercise.getId(), QuizExerciseStatisticUpdateDTO.of(quizExercise));
     }
 
     /**
@@ -310,7 +310,6 @@ public class QuizSubmissionService extends AbstractQuizSubmissionService<QuizSub
         var participation = participationService.findOneByExerciseAndStudentLoginAnyState(quizExercise, userLogin).orElseThrow();
         quizSubmission.setParticipation(participation);
         quizSubmission = quizSubmissionRepository.save(quizSubmission);
-        quizSubmission.filterForStudentsDuringQuiz();
         log.info("{} Saved quiz submission for user {} in quiz {} after {} ", logText, userLogin, exerciseId, TimeLogUtil.formatDurationFrom(start));
 
         return quizSubmission;
@@ -407,9 +406,7 @@ public class QuizSubmissionService extends AbstractQuizSubmissionService<QuizSub
     @Override
     protected QuizSubmission save(QuizExercise quizExercise, QuizSubmission quizSubmission, User user) {
         quizSubmission.setParticipation(this.getParticipation(quizExercise, quizSubmission, user));
-        var savedQuizSubmission = quizSubmissionRepository.save(quizSubmission);
-        savedQuizSubmission.filterForStudentsDuringQuiz();
-        return savedQuizSubmission;
+        return quizSubmissionRepository.save(quizSubmission);
     }
 
     private MultipleChoiceSubmittedAnswer createMultipleChoiceSubmittedAnswerFromDTO(MultipleChoiceSubmittedAnswerFromStudentDTO submittedAnswer,
