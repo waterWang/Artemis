@@ -4,6 +4,7 @@ import jakarta.validation.constraints.NotNull;
 
 import org.jspecify.annotations.Nullable;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
@@ -20,8 +21,8 @@ import de.tum.cit.aet.artemis.text.domain.TextExercise;
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonInclude(JsonInclude.Include.NON_EMPTY)
-public record ExerciseImportDTO(@NotNull Long id, @NotNull ExerciseType exerciseType, @Nullable String title, @Nullable String shortName, @Nullable Double maxPoints,
-        @Nullable Double bonusPoints) {
+public record ExerciseImportDTO(@NotNull Long id, @JsonAlias("type") @NotNull ExerciseType exerciseType, @Nullable String title, @Nullable String shortName,
+        @Nullable Double maxPoints, @Nullable Double bonusPoints) {
 
     /**
      * Creates an ExerciseImportDTO from an existing Exercise entity.

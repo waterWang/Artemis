@@ -21,6 +21,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.test.context.support.WithMockUser;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import de.tum.cit.aet.artemis.account.util.UserUtilService;
 import de.tum.cit.aet.artemis.assessment.repository.GradingCriterionRepository;
 import de.tum.cit.aet.artemis.core.security.Role;
@@ -36,6 +38,7 @@ import de.tum.cit.aet.artemis.exam.test_repository.ExamTestRepository;
 import de.tum.cit.aet.artemis.exam.util.ExamFactory;
 import de.tum.cit.aet.artemis.exam.util.ExamUtilService;
 import de.tum.cit.aet.artemis.exercise.domain.Exercise;
+import de.tum.cit.aet.artemis.exercise.domain.ExerciseType;
 import de.tum.cit.aet.artemis.globalsearch.dto.searchableentity.ExerciseSearchableEntityDTO;
 import de.tum.cit.aet.artemis.globalsearch.service.SearchableEntityWeaviateService;
 import de.tum.cit.aet.artemis.globalsearch.service.WeaviateService;
@@ -476,6 +479,44 @@ class ExerciseGroupIntegrationJenkinsLocalVCTest extends AbstractSpringIntegrati
         assertThat(reloadedImported.getTitle()).isEqualTo("Edited text title");
         assertThat(reloadedImported.getMaxPoints()).isEqualTo(42.0);
         assertThat(reloadedImported.getBonusPoints()).isEqualTo(7.0);
+    }
+
+    @Test
+    @WithMockUser(username = TEST_PREFIX + "instructor1", roles = "INSTRUCTOR")
+    void importExerciseGroup_legacyTypeDiscriminatorBindsToExerciseType() throws Exception {
+        // Regression fence for a silent, non-4xx binding loss: the import-exercise-group endpoint moved from a full
+        // List<ExerciseGroup> body (whose Exercise entities carried the polymorphic discriminator under @JsonTypeInfo
+        // property "type") to the slim ExerciseGroupImportDTO/ExerciseImportDTO shape (discriminator field "exerciseType").
+        // A stale cached client tab still POSTs the legacy "type" key. Because both DTOs use
+        // @JsonIgnoreProperties(ignoreUnknown = true), an unmapped "type" would NOT 400 - it would silently leave
+        // exerciseType null and lose the exercise type. @JsonAlias("type") on ExerciseImportDTO.exerciseType maps the legacy
+        // key back. The legacy discriminator values are the lowercase names from Exercise's @JsonSubTypes
+        // (programming/file-upload/...), which are exactly ExerciseType's @JsonValue serialization values, so no value
+        // remapping is required.
+        ObjectMapper mapper = new ObjectMapper();
+
+        String legacyBody = """
+                {
+                  "title": "Legacy group",
+                  "isMandatory": true,
+                  "exercises": [
+                    { "id": 42, "type": "programming", "title": "Legacy PE", "shortName": "leg1" },
+                    { "id": 43, "type": "file-upload", "title": "Legacy FU" }
+                  ]
+                }
+                """;
+
+        ExerciseGroupImportDTO group = mapper.readValue(legacyBody, ExerciseGroupImportDTO.class);
+
+        assertThat(group.exercises()).hasSize(2);
+        assertThat(group.exercises().get(0).exerciseType()).isEqualTo(ExerciseType.PROGRAMMING);
+        assertThat(group.exercises().get(0).id()).isEqualTo(42L);
+        assertThat(group.exercises().get(1).exerciseType()).isEqualTo(ExerciseType.FILE_UPLOAD);
+        assertThat(group.exercises().get(1).id()).isEqualTo(43L);
+
+        // The current wire field "exerciseType" still binds (the alias is additive, not a replacement).
+        ExerciseImportDTO current = mapper.readValue("{ \"id\": 7, \"exerciseType\": \"text\" }", ExerciseImportDTO.class);
+        assertThat(current.exerciseType()).isEqualTo(ExerciseType.TEXT);
     }
 
     /**
