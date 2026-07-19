@@ -66,12 +66,11 @@ public record ExerciseImportDTO(@NotNull Long id, @NotNull ExerciseType exercise
      * Creates a skeleton Exercise entity from this DTO.
      * The actual exercise import will use the ID to look up the source exercise.
      * <p>
-     * WARNING: the returned skeleton carries ONLY this DTO's six fields (id, exercise type, and the optional overrides
-     * title, short name, max points and bonus points). It is intentionally missing every other exercise "basis" detail
-     * (problem statement, difficulty, grading instructions/criteria, competency links, and the per-type content). It MUST
-     * be enriched from the reloaded DB source exercise via
-     * {@code ExamImportService#copyExerciseDetailsForExamImport} (plus the per-type detail copies) before being passed to
-     * any import service, otherwise those basis fields are silently lost.
+     * NOTE: the returned skeleton carries ONLY this DTO's six fields (id, exercise type, and the optional overrides
+     * title, short name, max points and bonus points). Every other exercise "basis" detail is recovered during import:
+     * {@code ExerciseImportService#copyExerciseBasis} falls back to the template (source) exercise for null skeleton
+     * fields, and {@code ExamImportService} enriches the skeleton with what that fallback cannot see
+     * (includedInOverallScore, grading criteria, competency links; for programming, the full detail copy).
      *
      * @return a new Exercise entity with basic properties set
      */
@@ -81,9 +80,10 @@ public record ExerciseImportDTO(@NotNull Long id, @NotNull ExerciseType exercise
         exercise.setId(id);
         // Set the client-editable overrides unconditionally so an OMITTED override is faithfully preserved as a null field
         // on the skeleton. BaseExercise initializes maxPoints/bonusPoints to 1.0/0.0, so a guarded setter would leave those
-        // non-null defaults and make "omitted" indistinguishable from "explicitly requested the default". The exam-import
-        // merge relies on a null here meaning "override omitted" and backfills it from the reloaded source exercise
-        // (source-first + non-null-override); see ExamImportService#backfillOmittedBasisOverridesFromSource.
+        // non-null defaults and make "omitted" indistinguishable from "explicitly requested the default". The import
+        // relies on a null here meaning "override omitted" and backfills it from the reloaded source exercise
+        // (source-first + non-null-override): programming via ExamImportService#backfillOmittedBasisOverridesFromSource,
+        // the other types via the template fallback in ExerciseImportService#copyExerciseBasis.
         exercise.setTitle(title);
         exercise.setShortName(shortName);
         exercise.setMaxPoints(maxPoints);

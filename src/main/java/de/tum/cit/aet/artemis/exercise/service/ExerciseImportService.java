@@ -112,9 +112,16 @@ public abstract class ExerciseImportService {
         }
         newExercise.setCompetencyLinks(copiedLinks);
 
-        Exercise plagiarismSource = hasPlagiarismDetectionConfig(importedExercise) ? importedExercise : templateExercise;
-        if (hasPlagiarismDetectionConfig(plagiarismSource)) {
-            newExercise.setPlagiarismDetectionConfig(new PlagiarismDetectionConfig(plagiarismSource.getPlagiarismDetectionConfig()));
+        // Exam exercises never carry a plagiarism detection config: they are non-course exercises, and the programming
+        // exam-import path already nulls the config for them (ProgrammingExerciseImportBasicService#prepareBasicExerciseInformation).
+        // Skip the copy entirely for exam targets so that the template fallback cannot leak the source course's
+        // configuration onto an imported exam exercise. Note that the lazy to-one field always holds at least a proxy on
+        // a loaded template, so a null on the importedExercise skeleton alone would NOT suppress the fallback.
+        if (newExercise.getExerciseGroup() == null) {
+            Exercise plagiarismSource = hasPlagiarismDetectionConfig(importedExercise) ? importedExercise : templateExercise;
+            if (hasPlagiarismDetectionConfig(plagiarismSource)) {
+                newExercise.setPlagiarismDetectionConfig(new PlagiarismDetectionConfig(plagiarismSource.getPlagiarismDetectionConfig()));
+            }
         }
 
         if (newExercise.getExerciseGroup() != null) {

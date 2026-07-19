@@ -471,10 +471,12 @@ public class ExamImportService {
                         // competency links: fetching two independent Set collections in one query produces a row cartesian
                         // product. Mirror the programming-exercise import path.
                         copyExerciseDetailsForExamImport(source, modelingSkeleton, gradingCriterionRepository.findByExerciseIdWithEagerGradingCriteria(sourceExerciseId));
-                        // Modeling-specific details that copyModelingExerciseBasis reads from the imported (skeleton) exercise.
-                        modelingSkeleton.setDiagramType(source.getDiagramType());
-                        modelingSkeleton.setExampleSolutionModel(source.getExampleSolutionModel());
-                        modelingSkeleton.setExampleSolutionExplanation(source.getExampleSolutionExplanation());
+                        // Competency links are fetched by findWithExamImportBasisById and would otherwise be lost (the
+                        // import service reads them off the skeleton, never off the template); it resolves them for the
+                        // target course via CompetencyExerciseLinkService. All remaining modeling content (diagram type,
+                        // example solution) needs no explicit copy: the import service falls back to the template
+                        // exercise — the same DB row as the source — for every null skeleton field.
+                        modelingSkeleton.setCompetencyLinks(source.getCompetencyLinks());
                         yield api.importModelingExercise(sourceExerciseId, modelingSkeleton);
                     }
 
@@ -489,12 +491,9 @@ public class ExamImportService {
                         }
                         TextExercise source = optionalSource.get();
                         TextExercise textSkeleton = (TextExercise) exerciseToCopy;
-                        // Load the grading criteria with a separate query instead of join-fetching them together with the
-                        // competency links: fetching two independent Set collections in one query produces a row cartesian
-                        // product. Mirror the programming-exercise import path.
+                        // Separate grading-criteria query and competency-link handling: see the MODELING case above.
                         copyExerciseDetailsForExamImport(source, textSkeleton, gradingCriterionRepository.findByExerciseIdWithEagerGradingCriteria(sourceExerciseId));
-                        // Text-specific detail that copyTextExerciseBasis reads from the imported (skeleton) exercise.
-                        textSkeleton.setExampleSolution(source.getExampleSolution());
+                        textSkeleton.setCompetencyLinks(source.getCompetencyLinks());
                         yield api.importTextExercise(sourceExerciseId, textSkeleton);
                     }
 
@@ -529,21 +528,21 @@ public class ExamImportService {
                         }
                         FileUploadExercise source = optionalSource.get();
                         FileUploadExercise fileUploadSkeleton = (FileUploadExercise) exerciseToCopy;
-                        // Load the grading criteria with a separate query instead of join-fetching them together with the
-                        // competency links: fetching two independent Set collections in one query produces a row cartesian
-                        // product. Mirror the programming-exercise import path.
+                        // Separate grading-criteria query and competency-link handling: see the MODELING case above.
                         copyExerciseDetailsForExamImport(source, fileUploadSkeleton, gradingCriterionRepository.findByExerciseIdWithEagerGradingCriteria(sourceExerciseId));
-                        // File-upload-specific details that copyFileUploadExerciseBasis reads from the imported (skeleton) exercise.
-                        fileUploadSkeleton.setFilePattern(source.getFilePattern());
-                        fileUploadSkeleton.setExampleSolution(source.getExampleSolution());
+                        fileUploadSkeleton.setCompetencyLinks(source.getCompetencyLinks());
                         yield api.importFileUploadExercise(sourceExerciseId, fileUploadSkeleton);
                     }
 
                     case QUIZ -> {
-                        // Reuse the pre-existing shared quiz query (questions, statistics and batches). Grading criteria are
-                        // loaded with a separate query below (join-fetching them alongside another Set produces a row
-                        // cartesian product), and competency links are intentionally NOT fetched: the quiz exam-import path
-                        // has no cross-course resolution step, so it discards them (see below) rather than persisting them.
+                        // Reuse the pre-existing shared quiz query (questions and statistics). Grading criteria are loaded
+                        // with a separate query below (join-fetching them alongside another Set produces a row cartesian
+                        // product). Competency links are intentionally NOT fetched and never copied: the quiz exam-import
+                        // path has no competency-link resolution step (unlike modeling/text/file-upload, which resolve
+                        // links via CompetencyExerciseLinkService, and unlike programming, which drops them), so a
+                        // cross-course import would persist links pointing at the SOURCE course's competencies. Dropping
+                        // the links (the skeleton carries none) matches the pre-existing behavior; proper resolution is
+                        // tracked as future work.
                         final Optional<QuizExercise> optionalOriginalQuizExercise = quizExerciseRepository.findWithEagerQuestionsAndStatisticsById(sourceExerciseId);
                         if (optionalOriginalQuizExercise.isEmpty()) {
                             yield Optional.empty();
@@ -553,31 +552,14 @@ public class ExamImportService {
                         // (e.g., nulling question IDs and clearing statistics). We must NOT pass the
                         // same managed entity for both parameters, as that would corrupt the original
                         // quiz in the L1 cache. The exerciseToCopy skeleton already has the correct
-                        // exercise group, title, shortName, etc. from the DTO conversion.
-                        // However, the skeleton does not contain the source exercise's details (problem
-                        // statement, difficulty, grading criteria, quiz questions/batches, quiz
-                        // mode/duration): these are not part of ExerciseImportDTO, so we copy them from
-                        // the original before importing.
+                        // exercise group, title, shortName, etc. from the DTO conversion; the quiz
+                        // questions are not part of ExerciseImportDTO, so we copy them from the original.
                         QuizExercise quizSkeleton = (QuizExercise) exerciseToCopy;
                         copyExerciseDetailsForExamImport(originalQuizExercise, quizSkeleton, gradingCriterionRepository.findByExerciseIdWithEagerGradingCriteria(sourceExerciseId));
-                        // Known limitation: the quiz exam-import path has no competency-link resolution step (unlike
-                        // modeling/text/file-upload, which resolve links via CompetencyExerciseLinkService, and unlike
-                        // programming, which also drops them here). QuizExerciseImportService saves the exercise with the
-                        // links from the skeleton cascaded as-is, which for a cross-course import would persist links
-                        // pointing at the SOURCE course's competencies. Since there is no resolve/skip-cross-course step,
-                        // the competency links are deliberately never fetched onto the source (the reload query above omits
-                        // them) and are explicitly cleared here so none can be cascaded, matching the pre-existing behavior
-                        // where the quiz skeleton carried no links. Dropping links is the safe minimal fix; adding proper
-                        // resolution is tracked as future work.
-                        quizSkeleton.setCompetencyLinks(new HashSet<>());
                         quizSkeleton.setQuizQuestions(originalQuizExercise.getQuizQuestions());
-                        quizSkeleton.setQuizBatches(originalQuizExercise.getQuizBatches());
-                        // Quiz-specific configuration that copyQuizExerciseBasis reads from the imported (skeleton) exercise.
-                        quizSkeleton.setRandomizeQuestionOrder(originalQuizExercise.isRandomizeQuestionOrder());
-                        quizSkeleton.setAllowedNumberOfAttempts(originalQuizExercise.getAllowedNumberOfAttempts());
-                        quizSkeleton.setRemainingNumberOfAttempts(originalQuizExercise.getRemainingNumberOfAttempts());
-                        quizSkeleton.setQuizMode(originalQuizExercise.getQuizMode());
-                        quizSkeleton.setDuration(originalQuizExercise.getDuration());
+                        // Don't copy batches — exam timing controls quiz scheduling, and the import service skips batch
+                        // copying for exam exercises. The quiz settings (randomization, attempts, mode, duration) need no
+                        // explicit copy either: the import service reads them from the template (original) exercise.
                         // We don't allow a modification of the exercise at this point, so we can just pass an empty list of files.
                         yield Optional.of(quizExerciseImportService.importQuizExercise(originalQuizExercise, quizSkeleton, null));
                     }
@@ -643,49 +625,51 @@ public class ExamImportService {
     }
 
     /**
-     * Copies the generic exercise "basis" details from the DB-loaded source exercise onto the transient exam-import
-     * skeleton. {@link de.tum.cit.aet.artemis.exam.dto.ExerciseImportDTO} only carries id/title/short name/points, so the
-     * skeleton built from it would otherwise be missing these details; {@code copyExerciseBasis} would then read null/blank
-     * values from it and silently drop the exercise content for MODELING/TEXT/FILE_UPLOAD/QUIZ exam exercises.
-     * <p>
-     * The client-editable overrides already present on the skeleton (title, short name, max points, bonus points and the
-     * target exercise group) are intentionally NOT overwritten when present. When the
-     * {@link de.tum.cit.aet.artemis.exam.dto.ExerciseImportDTO} omitted an override, the skeleton's corresponding field is
-     * {@code null} and is backfilled here from {@code source} instead of being persisted blank (source-first +
-     * non-null-override); see {@link #backfillOmittedBasisOverridesFromSource}.
-     * <p>
+     * Copies onto the transient exam-import skeleton the exercise "basis" details that the per-type import services
+     * cannot recover on their own. {@link de.tum.cit.aet.artemis.exam.dto.ExerciseImportDTO} only carries id/title/short
+     * name/points, so the skeleton starts without any other detail. Most of the missing content needs no explicit copy:
+     * {@code ExerciseImportService#copyExerciseBasis} falls back to the template exercise — the same DB row as
+     * {@code source} — for every null skeleton field (problem statement, difficulty, assessment type, grading
+     * instructions, and the client-editable title/points overrides; an override the client supplied stays non-null on the
+     * skeleton and wins). Two details defeat that fallback and must be copied here:
+     * <ul>
+     * <li>{@code includedInOverallScore} has a non-null default, so the fallback cannot tell an omitted value from an
+     * intended one and would keep the skeleton default (mirrors {@code CourseMaterialImportService#copyImportOverrides}).</li>
+     * <li>The skeleton's grading-criteria collection is an initialized empty set, which the fallback treats as an
+     * intended value — the template's criteria would never be used.</li>
+     * </ul>
      * Grading criteria are passed in explicitly rather than read off {@code source}: the callers load them with a separate
      * query (join-fetching them together with the competency links would produce a row cartesian product), and reading
      * them off the source would rely on an unenforced "set grading criteria on the source first" call-order side channel.
      * Note that {@link Exercise#setGradingCriteria} REPARENTS the passed criteria onto the skeleton (it rewrites each
      * criterion's {@code exercise} back-reference to point at the skeleton). That is intended here — the skeleton is the
-     * exercise that will be imported — and is safe because callers pass a freshly loaded, detached criteria set, never the
+     * exercise that will be imported — and is safe because callers pass a freshly loaded criteria set, never the
      * source's live managed collection.
+     * <p>
+     * Competency links are deliberately NOT copied here: only the modeling/text/file-upload callers load them (their
+     * reload queries fetch {@code competencyLinks.competency}) and copy them at the call site. The quiz caller's reload
+     * query does not fetch the collection, so reading it here would trigger a lazy load (or a
+     * {@code LazyInitializationException} on a detached source). The plagiarism detection config needs no handling
+     * either: {@code ExerciseImportService#copyExerciseBasis} skips the plagiarism-config copy for exam exercises
+     * entirely.
      *
-     * @param source                the DB-loaded source exercise with its basis details eagerly fetched
+     * @param source                the DB-loaded source exercise
      * @param skeleton              the exam-import skeleton to enrich in place
      * @param sourceGradingCriteria the source's grading criteria, loaded separately by the caller (reparented onto the skeleton)
      */
     private static void copyExerciseDetailsForExamImport(final Exercise source, final Exercise skeleton, final Set<GradingCriterion> sourceGradingCriteria) {
-        backfillOmittedBasisOverridesFromSource(skeleton, source);
-        skeleton.setProblemStatement(source.getProblemStatement());
-        skeleton.setDifficulty(source.getDifficulty());
-        skeleton.setAssessmentType(source.getAssessmentType());
         skeleton.setIncludedInOverallScore(source.getIncludedInOverallScore());
-        skeleton.setGradingInstructions(source.getGradingInstructions());
         skeleton.setGradingCriteria(sourceGradingCriteria);
-        skeleton.setCompetencyLinks(source.getCompetencyLinks());
-        // Do NOT copy the plagiarism detection config. Exam exercises are non-course exercises, and the programming
-        // exam-import path deliberately nulls the plagiarism config for non-course exercises
-        // (ProgrammingExerciseImportBasicService#prepareBasicExerciseInformation). Null it explicitly here so every
-        // exam-import exercise type shares that invariant instead of leaking the source course's plagiarism configuration.
-        skeleton.setPlagiarismDetectionConfig(null);
     }
 
     /**
-     * Applies the client-editable "basis" overrides (title, short name, max points, bonus points) to the exam-import
-     * skeleton with source-first + non-null-override precedence: a value the client supplied on the skeleton wins, and an
-     * omitted override (a {@code null} skeleton field) is backfilled from the reloaded DB source exercise.
+     * Applies the client-editable "basis" overrides (title, short name, max points, bonus points) to the PROGRAMMING
+     * exam-import skeleton with source-first + non-null-override precedence: a value the client supplied on the skeleton
+     * wins, and an omitted override (a {@code null} skeleton field) is backfilled from the reloaded DB source exercise.
+     * Only the programming path needs this — the other exercise types get the same title/points semantics from the
+     * template fallback in {@code ExerciseImportService#copyExerciseBasis} (their short name is never copied by that
+     * method), while the programming import copies the skeleton's fields directly and its prechecks read them even
+     * earlier.
      * <p>
      * This is how the nullable {@link de.tum.cit.aet.artemis.exam.dto.ExerciseImportDTO} components reach the merge:
      * {@code ExerciseImportDTO#toEntity} sets these four fields unconditionally, so an omitted override is faithfully

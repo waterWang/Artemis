@@ -103,8 +103,8 @@ public interface ModelingExerciseRepository extends ArtemisJpaRepository<Modelin
      * import (they would otherwise be lost because the exam-import skeleton is built from a slim DTO). The grading
      * criteria are intentionally NOT join-fetched here: fetching two independent {@code Set} collections (competencyLinks
      * and gradingCriteria) in a single query produces a row cartesian product, so the caller loads the grading criteria
-     * with a separate query instead. The plagiarism detection config is not fetched either: exam exercises are non-course
-     * exercises whose plagiarism config is nulled on import (see ExamImportService#copyExerciseDetailsForExamImport).
+     * with a separate query instead. The plagiarism detection config is not fetched either: the
+     * import never copies it onto exam exercises (see ExerciseImportService#copyExerciseBasis).
      *
      * @param exerciseId the id of the source exercise
      * @return the exercise with its competency links, or empty if not found

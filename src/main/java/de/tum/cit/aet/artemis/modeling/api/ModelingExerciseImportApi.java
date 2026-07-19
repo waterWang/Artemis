@@ -59,8 +59,8 @@ public class ModelingExerciseImportApi extends AbstractModelingApi {
     /**
      * Loads the source modeling exercise with its competency links, needed to preserve them during exam import. The
      * grading criteria are loaded separately by the caller (see ExamImportService), and the plagiarism detection config
-     * is intentionally not loaded because exam exercises are non-course exercises whose plagiarism config is nulled on
-     * import.
+     * is intentionally not loaded because the import never copies it onto exam exercises (see
+     * ExerciseImportService#copyExerciseBasis).
      *
      * @param sourceExerciseId the id of the source exercise
      * @return the source exercise with its competency links, or empty if it no longer exists

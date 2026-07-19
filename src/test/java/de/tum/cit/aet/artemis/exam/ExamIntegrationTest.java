@@ -32,6 +32,7 @@ import java.util.Set;
 import java.util.stream.Stream;
 
 import org.apache.commons.io.FileUtils;
+import org.hibernate.Hibernate;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
@@ -2544,6 +2545,12 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
         // The source quiz still has its competency link (untouched by the import).
         QuizExercise reloadedSource = quizExerciseRepository.findWithEagerQuestionsAndStatisticsAndCompetenciesAndBatchesAndGradingCriteriaById(sourceQuizId).orElseThrow();
         assertThat(reloadedSource.getCompetencyLinks()).as("source quiz competency links must be untouched").hasSize(1);
+
+        // Query-shape pin: the quiz exam-import reload query must NOT fetch the competency links, and the import path
+        // must never read them off the source — on a detached source (as here) that read would throw a
+        // LazyInitializationException.
+        QuizExercise slimReloadedSource = quizExerciseRepository.findWithEagerQuestionsAndStatisticsById(sourceQuizId).orElseThrow();
+        assertThat(Hibernate.isInitialized(slimReloadedSource.getCompetencyLinks())).as("competency links must stay unfetched on the quiz exam-import reload query").isFalse();
     }
 
     @Test
