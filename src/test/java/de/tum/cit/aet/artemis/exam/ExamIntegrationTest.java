@@ -75,6 +75,7 @@ import de.tum.cit.aet.artemis.exam.dto.ExamSessionDTO;
 import de.tum.cit.aet.artemis.exam.dto.ExamSidebarDataDTO;
 import de.tum.cit.aet.artemis.exam.dto.ExamUpdateDTO;
 import de.tum.cit.aet.artemis.exam.dto.ExamWithIdAndCourseDTO;
+import de.tum.cit.aet.artemis.exam.dto.LockedExamSubmissionDTO;
 import de.tum.cit.aet.artemis.exam.dto.SuspiciousExamSessionsDTO;
 import de.tum.cit.aet.artemis.exam.repository.ExamUserRepository;
 import de.tum.cit.aet.artemis.exam.service.ExamDateService;
@@ -761,6 +762,14 @@ class ExamIntegrationTest extends AbstractSpringIntegrationJenkinsLocalVCBatchTe
     void testUpdateExam_failsWithExamCourseMismatch() throws Exception {
         // Exam belongs to course1 but URL has course2 -> conflict (course id mismatch)
         request.put("/api/exam/courses/" + course2.getId() + "/exams", ExamUpdateDTO.of(exam1), HttpStatus.CONFLICT);
+    }
+
+    @Test
+    @WithMockUser(username = TEST_PREFIX + "instructor1", roles = "INSTRUCTOR")
+    void testGetLockedSubmissionsForExam_failsWithExamCourseMismatch() throws Exception {
+        // The locked submissions are loaded by exam id alone. Authorizing only the course would let an instructor
+        // pair a course they manage with another course's exam and read that exam's submissions.
+        request.get("/api/exam/courses/" + course2.getId() + "/exams/" + exam1.getId() + "/locked-submissions", HttpStatus.CONFLICT, LockedExamSubmissionDTO.class);
     }
 
     @ParameterizedTest
