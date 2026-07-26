@@ -61,6 +61,9 @@ class SlideSplitterServiceTest extends AbstractSpringIntegrationIndependentBatch
     private SlideSplitterService slideSplitterService;
 
     @Autowired
+    private SlideVisibilityUpdateService slideVisibilityUpdateService;
+
+    @Autowired
     private SlideTestRepository slideRepository;
 
     @Autowired
@@ -392,7 +395,7 @@ class SlideSplitterServiceTest extends AbstractSpringIntegrationIndependentBatch
 
     @Test
     @WithMockUser(username = TEST_PREFIX + "instructor", roles = "INSTRUCTOR")
-    void updateSlideMetadataUsesSlideEntityIdsAndKeepsImagePaths() {
+    void updateSlideVisibilityUsesSlideEntityIdsAndKeepsImagePaths() {
         Exercise testExercise = new TextExercise();
         testExercise.setTitle("Test Exercise");
         exerciseRepository.save(testExercise);
@@ -418,7 +421,7 @@ class SlideSplitterServiceTest extends AbstractSpringIntegrationIndependentBatch
         String decoySlideImagePath = decoySlide.getSlideImagePath();
         ZonedDateTime hiddenDate = ZonedDateTime.now().plusDays(1);
 
-        slideSplitterService.updateSlideMetadata(testAttachmentVideoUnit, List.of(new HiddenPageInfoDTO(targetSlide.getId().toString(), hiddenDate, testExercise.getId())));
+        slideSplitterService.updateSlideVisibility(testAttachmentVideoUnit, List.of(new HiddenPageInfoDTO(targetSlide.getId().toString(), hiddenDate, testExercise.getId())));
 
         Slide updatedTargetSlide = slideRepository.findById(targetSlide.getId()).orElseThrow();
         Slide updatedDecoySlide = slideRepository.findById(decoySlide.getId()).orElseThrow();
@@ -476,31 +479,16 @@ class SlideSplitterServiceTest extends AbstractSpringIntegrationIndependentBatch
 
     @Test
     @WithMockUser(username = TEST_PREFIX + "instructor", roles = "INSTRUCTOR")
-    void updateSlideMetadataDoesNotClearHiddenStateWhenHiddenPagesIsNull() {
-        Exercise testExercise = new TextExercise();
-        testExercise.setTitle("Test Exercise");
-        exerciseRepository.save(testExercise);
+    void studentVersionFailureRollsBackVisibilityUpdate() {
+        Slide slide = slideRepository.findAllByAttachmentVideoUnitId(testAttachmentVideoUnit.getId()).getFirst();
+        testAttachmentVideoUnit.getAttachment().setLink("attachments/attachment-unit/" + testAttachmentVideoUnit.getId() + "/missing.pdf");
+        attachmentVideoUnitRepository.saveAndFlush(testAttachmentVideoUnit);
+        ZonedDateTime hiddenUntil = ZonedDateTime.now().plusDays(1);
 
-        List<Slide> existingSlides = slideRepository.findAllByAttachmentVideoUnitId(testAttachmentVideoUnit.getId());
-        slideRepository.deleteAll(existingSlides);
+        assertThatThrownBy(() -> slideVisibilityUpdateService.updateVisibilityAndStudentVersion(testAttachmentVideoUnit,
+                List.of(new HiddenPageInfoDTO(slide.getId().toString(), hiddenUntil, null)))).isInstanceOf(InternalServerErrorException.class);
 
-        ZonedDateTime hiddenDate = ZonedDateTime.now().plusDays(1);
-        Slide slide = new Slide();
-        slide.setSlideNumber(1);
-        slide.setAttachmentVideoUnit(testAttachmentVideoUnit);
-        slide.setSlideImagePath("slide/path.png");
-        slide.setHidden(hiddenDate);
-        slide.setExercise(testExercise);
-        slide = slideRepository.save(slide);
-
-        slideSplitterService.updateSlideMetadata(testAttachmentVideoUnit, null);
-
-        Slide updatedSlide = slideRepository.findById(slide.getId()).orElseThrow();
-        assertThat(updatedSlide.getHidden()).isNotNull();
-        assertThat(updatedSlide.getHidden().toInstant().truncatedTo(ChronoUnit.SECONDS)).isEqualTo(hiddenDate.toInstant().truncatedTo(ChronoUnit.SECONDS));
-        assertThat(updatedSlide.getExercise()).isNotNull();
-        assertThat(updatedSlide.getExercise().getId()).isEqualTo(testExercise.getId());
-        assertThat(updatedSlide.getSlideImagePath()).isEqualTo("slide/path.png");
+        assertThat(slideRepository.findById(slide.getId()).orElseThrow().getHidden()).isNull();
     }
 
     @Test
@@ -537,7 +525,7 @@ class SlideSplitterServiceTest extends AbstractSpringIntegrationIndependentBatch
 
     @Test
     @WithMockUser(username = TEST_PREFIX + "instructor", roles = "INSTRUCTOR")
-    void updateSlideMetadataClearsHiddenStateWhenHiddenPagesIsEmpty() {
+    void updateSlideVisibilityClearsHiddenStateWhenHiddenPagesIsEmpty() {
         Exercise testExercise = new TextExercise();
         testExercise.setTitle("Test Exercise");
         exerciseRepository.save(testExercise);
@@ -553,7 +541,7 @@ class SlideSplitterServiceTest extends AbstractSpringIntegrationIndependentBatch
         slide.setExercise(testExercise);
         slide = slideRepository.save(slide);
 
-        slideSplitterService.updateSlideMetadata(testAttachmentVideoUnit, List.of());
+        slideSplitterService.updateSlideVisibility(testAttachmentVideoUnit, List.of());
 
         Slide updatedSlide = slideRepository.findById(slide.getId()).orElseThrow();
         assertThat(updatedSlide.getHidden()).isNull();
